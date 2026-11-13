@@ -110,6 +110,12 @@ public interface IGame
     Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot);
 
     /// <summary>
+    /// Every Unlock the research menu lists, with its parent, extra requirement and the cost of each level as the game's
+    /// Farm.GetUnlockCost computes it, plus the inventory; no side effects.
+    /// </summary>
+    Task<UnlockTree> GetUnlockTree();
+
+    /// <summary>
     /// Starts (<paramref name="tool"/> is the running Tool's name) or ends (null) the Input Lock: while it lasts the
     /// game ignores every human input except F10 and shows the lock icon. Idempotent, and must also hold across a
     /// scene reload.

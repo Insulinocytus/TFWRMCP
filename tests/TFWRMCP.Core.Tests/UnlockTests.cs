@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -129,5 +130,67 @@ public class UnlockToolTests
 
         Assert.True(isError);
         Assert.Contains("refused", text);
+    }
+
+    static async Task<(bool IsError, string Text)> UnlockMany(FakeGame game, JObject args)
+    {
+        using var s = new TestServer(game);
+        return await s.Call("unlock", args);
+    }
+
+    [Fact]
+    public async Task A_batch_stops_at_the_first_failure_keeps_earlier_purchases_and_skips_the_rest()
+    {
+        var game = new FakeGame();
+        game.UnlockFacts["a"] = Facts("a");
+        game.UnlockFacts["b"] = Facts("b");
+        game.UnlockFacts["b"].Parent = "a2";
+        game.UnlockFacts["c"] = Facts("c");
+
+        var (isError, text) = await UnlockMany(game, new JObject { ["names"] = new JArray("a", "b", "c") });
+
+        Assert.False(isError);
+        var results = JObject.Parse(text)["results"]!;
+        Assert.Equal(3, results.Count());
+        Assert.Equal("a", (string)results[0]!["unlock"]!);
+        Assert.Equal(1, (int)results[0]!["level"]!);
+        Assert.Equal("b", (string)results[1]!["unlock"]!);
+        Assert.Contains("requires 'a2'", (string)results[1]!["error"]!);
+        Assert.Equal("c", (string)results[2]!["unlock"]!);
+        Assert.True((bool)results[2]!["skipped"]!);
+        Assert.Equal(new[] { "unlock:a" }, game.Events);
+        Assert.Equal(1, game.UnlockFacts["a"].Level);
+        Assert.Equal(0, game.UnlockFacts["c"].Level);
+    }
+
+    [Fact]
+    public async Task A_batch_that_succeeds_reports_every_new_level_in_order()
+    {
+        var game = new FakeGame();
+        game.UnlockFacts["a"] = Facts("a", max: 3);
+        game.UnlockFacts["b"] = Facts("b");
+
+        var (isError, text) = await UnlockMany(game, new JObject { ["names"] = new JArray("a", "b", "a") });
+
+        Assert.False(isError);
+        var results = JObject.Parse(text)["results"]!;
+        Assert.Equal(new[] { 1, 1, 2 }, results.Select(r => (int)r["level"]!));
+        Assert.Equal(new[] { "unlock:a", "unlock:b", "unlock:a" }, game.Events);
+    }
+
+    [Fact]
+    public async Task Exactly_one_of_name_and_names_must_be_passed()
+    {
+        var game = new FakeGame();
+        game.UnlockFacts["a"] = Facts("a");
+
+        var both = await UnlockMany(game, new JObject { ["name"] = "a", ["names"] = new JArray("a") });
+        var neither = await UnlockMany(game, new JObject());
+        var empty = await UnlockMany(game, new JObject { ["names"] = new JArray() });
+
+        Assert.All(new[] { both, neither, empty }, r => Assert.True(r.IsError));
+        Assert.Contains("exactly one of 'name' or 'names'", both.Text);
+        Assert.Contains("exactly one of 'name' or 'names'", neither.Text);
+        Assert.Empty(game.Events);
     }
 }

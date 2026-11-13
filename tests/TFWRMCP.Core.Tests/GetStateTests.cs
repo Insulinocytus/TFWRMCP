@@ -50,6 +50,28 @@ public class GetStateTests
     }
 
     [Fact]
+    public async Task Unlocks_show_their_parent_and_extra_requirement_only_when_they_have_them()
+    {
+        var game = new FakeGame();
+        game.State.Unlocks.Add(new UnlockState
+        {
+            Name = "iron", MaxLevel = 1, Parent = "coal", AlsoRequires = new UnlockRequirement { Name = "expand", Level = 3 },
+        });
+        using var s = new TestServer(game);
+
+        var (_, text) = await s.Call("get_state");
+
+        var unlocks = JObject.Parse(text)["unlocks"]!;
+        var iron = unlocks.Single(u => (string)u["name"]! == "iron");
+        Assert.Equal("coal", (string)iron["parent"]!);
+        Assert.Equal("expand", (string)iron["also_requires"]!["name"]!);
+        Assert.Equal(3, (int)iron["also_requires"]!["level"]!);
+        var grass = unlocks.Single(u => (string)u["name"]! == "grass");
+        Assert.Null(grass["parent"]);
+        Assert.Null(grass["also_requires"]);
+    }
+
+    [Fact]
     public async Task Game_errors_are_reported_as_tool_errors()
     {
         var game = new ThrowingGame();
@@ -115,6 +137,7 @@ public class GetStateTests
         public Task StopRun() => throw new NotSupportedException();
         public event Action<RunEvent> RunEvents { add { } remove { } }
         public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot) => throw new NotSupportedException();
+        public Task<UnlockTree> GetUnlockTree() => throw new NotSupportedException();
         public Task SetInputLock(string? tool) => Task.CompletedTask;
         public event Action UserTookOver { add { } remove { } }
         public Task<string> ReadDoc(string page) => throw new NotSupportedException();

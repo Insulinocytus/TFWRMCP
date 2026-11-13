@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
@@ -20,16 +21,93 @@ public static partial class Tools
         return new { unlock = facts.Name, level = attempt.Level };
     }
 
+    static async Task<object?> UnlockMany(IGame game, JArray names, CancellationToken cancel)
+    {
+        var results = new List<object?>();
+        var failed = false;
+        foreach (var name in names.Select(n => (string)n!))
+        {
+            if (failed)
+            {
+                results.Add(new { unlock = name, skipped = true });
+                continue;
+            }
+
+            cancel.ThrowIfCancellationRequested();
+            try
+            {
+                results.Add(await Unlock(game, name));
+            }
+            catch (ToolException e)
+            {
+                failed = true;
+                results.Add(new { unlock = name, error = e.Message });
+            }
+        }
+        return new { results };
+    }
+
+    static JArray? OptionalStrings(JObject args, string name)
+    {
+        var value = args[name];
+        if (value == null || value.Type == JTokenType.Null) return null;
+        if (value is not JArray { Count: > 0 } array || array.Any(i => i.Type != JTokenType.String))
+            throw new ToolException($"'{name}' must be a non-empty array of strings.");
+        return array;
+    }
+
+    static int? OptionalInt(JObject args, string name)
+    {
+        var value = args[name];
+        if (value == null || value.Type == JTokenType.Null) return null;
+        return value.Type == JTokenType.Integer && (long)value is >= int.MinValue and <= int.MaxValue
+            ? (int)value
+            : throw new ToolException($"'{name}' must be an integer.");
+    }
+
+    static JObject UnlockSchema()
+    {
+        var schema = Schema(("name", "string", "Unlock name as listed by get_state, e.g. \"plant\".", false));
+        ((JObject)schema["properties"]!)["names"] = new JObject
+        {
+            ["type"] = "array",
+            ["items"] = new JObject { ["type"] = "string" },
+            ["description"] = "Unlock names to buy one level each, in order; stops at the first failure.",
+        };
+        return schema;
+    }
+
     static IEnumerable<Tool> UnlockAndDocsTools(IGame game) => new[]
     {
         new Tool(
             "unlock",
             "Buys or upgrades an Unlock exactly like the research menu: costs and prerequisites are checked by the game " +
-            "(and its hat is unlocked too). On failure the error says why: unknown name, missing prerequisite, already at " +
-            "maximum level, unmet extra requirement, not enough items, or a Leaderboard Run or simulate() in progress.",
-            Schema(("name", "string", "Unlock name as listed by get_state, e.g. \"plant\".", true)),
-            (args, _) => Unlock(game, RequiredString(args, "name")),
+            "(and its hat is unlocked too); unlike this Tool, a Script's unlock() does not check the parent Unlock. " +
+            "Pass exactly one of name or names. With names the Unlocks are bought in order, one level each, stopping at " +
+            "the first failure without undoing earlier purchases; results lists each as {unlock, level} (bought, level " +
+            "after the purchase), {unlock, error} (failed) or {unlock, skipped} (not tried). On failure the error says " +
+            "why: unknown name, missing prerequisite, already at maximum level, unmet extra requirement, not enough " +
+            "items, or a Leaderboard Run or simulate() in progress.",
+            UnlockSchema(),
+            (args, cancel) =>
+            {
+                var name = OptionalString(args, "name");
+                var names = OptionalStrings(args, "names");
+                if ((name == null) == (names == null)) throw new ToolException("Pass exactly one of 'name' or 'names'.");
+                return name != null ? Unlock(game, name) : UnlockMany(game, names!, cancel);
+            },
             Capabilities.Unlock),
+        new Tool(
+            "plan_unlock",
+            "Plans the purchases needed to bring an Unlock to a level, without buying anything: steps lists every " +
+            "level still to buy in an order that works from the current state (parent Unlocks, levels of extra " +
+            "required Unlocks, then the target itself) as {unlock, level (after the purchase), cost}; already met " +
+            "requirements are not listed, and steps is empty when the target is reached. total_cost sums the steps; " +
+            "missing lists the items the inventory lacks for it. Costs are the game's, also for levels not yet reachable.",
+            Schema(("name", "string", "Unlock name as listed by get_state.", true),
+                ("level", "integer", "Target Unlock level. Defaults to the current level + 1.", false)),
+            async (args, _) => UnlockPlan.Build(await game.GetUnlockTree(), RequiredString(args, "name"), OptionalInt(args, "level")),
+            Capabilities.Unlock, Capabilities.State),
         new Tool(
             "list_docs",
             "Lists the documentation pages in the game's docs window (what its home page links to, in the game's " +

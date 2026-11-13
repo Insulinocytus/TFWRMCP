@@ -27,11 +27,15 @@ The server only listens on localhost. Its settings are in the game's options men
 
 ## Tools
 
-`get_state` returns the Save name, inventory, Unlock levels and next costs, world size, drone positions, every
-tile's entity and ground, and the Run status.
+`get_state` returns the Save name, inventory, Unlock levels, next costs and prerequisites (`parent`, `also_requires`),
+world size, drone positions, every tile's entity and ground, and the Run status.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.
+
+`unlock` buys one level of an Unlock, or the Unlocks in `names` in order (it stops at the first failure and keeps
+earlier purchases). `plan_unlock` lists, without buying, every purchase needed to reach an Unlock level (parents and
+required levels first), their total cost and the items you still lack.
 
 ## Input Lock
 

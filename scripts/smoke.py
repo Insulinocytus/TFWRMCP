@@ -338,11 +338,85 @@ def check_docs(mcp):
     print(f"    {len(pages)} pages listed")
 
 
+def check_unlock_plan(mcp):
+    state = ok(mcp, "get_state")
+    unlocks = {u["name"]: u for u in state["unlocks"]}
+    iron, loops = unlocks["iron"], unlocks["loops"]
+    assert iron["parent"] == "coal" and iron["also_requires"] == {"name": "expand", "level": 3}, iron
+    assert "parent" not in loops and "also_requires" not in loops, loops
+
+    plan = ok(mcp, "plan_unlock", name="iron")
+    owned = {name: u["level"] for name, u in unlocks.items()}
+    first_costs = {}
+    for step in plan["steps"]:
+        u = unlocks[step["unlock"]]
+        assert step["level"] == owned[u["name"]] + 1, step
+        assert not u.get("parent") or owned[u["parent"]] > 0, ("parent not bought before", step)
+        also = u.get("also_requires")
+        assert not also or owned[also["name"]] >= also["level"], ("extra requirement not met before", step)
+        owned[u["name"]] = step["level"]
+        first_costs.setdefault(u["name"], step)
+    assert plan["steps"][-1]["unlock"] == "iron" and owned["coal"] > 0 and owned["expand"] >= 3, plan
+    assert all(s["cost"] == unlocks[n]["next_cost"] for n, s in first_costs.items()), (first_costs, plan)
+    total = {}
+    for step in plan["steps"]:
+        for item, amount in step["cost"].items():
+            total[item] = total.get(item, 0) + amount
+    assert plan["total_cost"] == total, plan
+    assert plan["missing"] == {i: n - state["inventory"].get(i, 0) for i, n in total.items() if n > state["inventory"].get(i, 0)}, plan
+    assert ok(mcp, "plan_unlock", name="grass", level=1) == {"steps": [], "total_cost": {}, "missing": {}}
+
+    fails(mcp, "plan_unlock", "No Unlock named", name="no-such-unlock")
+    fails(mcp, "plan_unlock", "maximum level", name="iron", level=iron["max_level"] + 1)
+    fails(mcp, "unlock", "exactly one", name="loops", names=["loops"])
+    fails(mcp, "unlock", "exactly one")
+
+    # No items on a fresh Save: the first purchase fails, the rest is not tried, nothing changes.
+    results = ok(mcp, "unlock", names=["loops", "hats"])["results"]
+    assert "Not enough items" in results[0]["error"] and results[0]["unlock"] == "loops", results
+    assert results[1] == {"unlock": "hats", "skipped": True}, results
+    assert ok(mcp, "get_state")["unlocks"] == state["unlocks"]
+
+
+def check_unlock_batch_and_costs(mcp):
+    state = ok(mcp, "get_state")
+    unlocks = {u["name"]: u for u in state["unlocks"]}
+
+    # Every planned expand level costs what the game's get_cost says (levels past its cost table are extrapolated).
+    expand = unlocks["expand"]
+    steps = ok(mcp, "plan_unlock", name="expand", level=expand["max_level"])["steps"]
+    assert [s["level"] for s in steps] == list(range(expand["level"] + 1, expand["max_level"] + 1)), steps
+    lines = [
+        f"print(get_cost(Unlocks.Expand, {s['level'] - 1})[Items.{item.title()}])" for s in steps for item in s["cost"]
+    ]
+    run = run_wait(mcp, "smoke_get_cost", "\n".join(lines) + "\n")
+    assert run["status"] == "finished", run
+    expected = [amount for s in steps for amount in s["cost"].values()]
+    assert [float(o) for o in run["output"]] == expected, (run["output"], expected)
+
+    levels = {name: u["level"] for name, u in unlocks.items()}
+    buy = next((u for u in state["unlocks"] if u["next_cost"] is not None
+                and (not u.get("parent") or levels[u["parent"]] > 0)
+                and (not u.get("also_requires") or levels[u["also_requires"]["name"]] >= u["also_requires"]["level"])
+                and all(state["inventory"].get(i, 0) >= n for i, n in u["next_cost"].items())), None)
+    if buy is None:
+        print("    nothing affordable on the test Save; batch purchase not checked")
+        return
+    name = buy["name"]
+    results = ok(mcp, "unlock", names=[name, "no-such-unlock", name])["results"]
+    assert results[0] == {"unlock": name, "level": buy["level"] + 1}, results
+    assert results[1]["unlock"] == "no-such-unlock" and "No Unlock named" in results[1]["error"], results
+    assert results[2] == {"unlock": name, "skipped": True}, results
+    after = {u["name"]: u["level"] for u in ok(mcp, "get_state")["unlocks"]}
+    assert after[name] == buy["level"] + 1, (name, after[name])
+    print(f"    batch bought {name} to level {after[name]}")
+
+
 # Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it the original Save's Unlocks.
 CHECKS = [
-    check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_docs,
-    check_scripts, check_grant_unlocks, check_run_finishes, check_run_timeout_wait_stop, check_run_parse_error,
-    check_run_runtime_error, check_run_output_buffer, check_leaderboard_run, check_save_switch_ends_run,
+    check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_unlock_plan, check_docs,
+    check_scripts, check_grant_unlocks, check_unlock_batch_and_costs, check_run_finishes, check_run_timeout_wait_stop,
+    check_run_parse_error, check_run_runtime_error, check_run_output_buffer, check_leaderboard_run, check_save_switch_ends_run,
 ]
 
 
