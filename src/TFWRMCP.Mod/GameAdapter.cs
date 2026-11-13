@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Core.Platform;
+using HarmonyLib;
 using UnityEngine.SceneManagement;
 
 namespace TFWRMCP.Mod;
@@ -21,6 +22,12 @@ public sealed partial class GameAdapter : IGame
     // Set by LoadSave; Unity null semantics make it read as null once the old scene is destroyed, until then GetScene reports Loading.
     MainSim? reloadFrom;
 
+    FieldInfo? parseExceptionField;
+    FieldInfo? spawnOffsetField;
+    readonly Harmony harmony = new("com.insulinocytus.tfwrmcp");
+
+    public event Action<RunEvent> RunEvents = delegate { };
+
     /// <summary>Resolves every reflection target up front; failures are logged and degrade only the dependent Tools.</summary>
     public GameAdapter(Action<string> warn)
     {
@@ -35,18 +42,70 @@ public sealed partial class GameAdapter : IGame
                      (typeof(SaveChooser), "GenerateUnusedSaveName"), (typeof(Menu), "LoadSave"), (typeof(Menu), "Play"),
                  })
             Resolve(Capabilities.Saves, type.GetMethod(name, Public), $"{type.Name}.{name}", warn);
+
+        InstallScriptAndRunSupport(warn);
         ResolveUnlockDocs(warn);
+    }
+
+    static MethodInfo? Method(Type type, string name) =>
+        type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
+            .FirstOrDefault(m => m.Name == name);
+
+    void InstallScriptAndRunSupport(Action<string> warn)
+    {
+        spawnOffsetField = Resolve(Capabilities.Scripts, typeof(Workspace).GetField("spawnWindowOffset", NonPublic), "Workspace.spawnWindowOffset", warn);
+        foreach (var (type, name) in new[]
+                 {
+                     (typeof(Saver), "SaveCode"), (typeof(Saver), "IsValidCodeFileName"), (typeof(Workspace), "OpenCodeWindow"),
+                     (typeof(Workspace), "IsValidFileName"), (typeof(CodeWindow), "ApplyExternalCode"), (typeof(Window), "Close"),
+                 })
+            Resolve(Capabilities.Scripts, Method(type, name), $"{type.Name}.{name}", warn);
+
+        parseExceptionField = Resolve(Capabilities.Run, typeof(CodeWindow).GetField("parseException", NonPublic), "CodeWindow.parseException", warn);
+        Resolve(Capabilities.Run, Method(typeof(CodeWindow), "PressExecuteOrStop"), "CodeWindow.PressExecuteOrStop", warn);
+        if (simField == null)
+        {
+            Fail(Capabilities.Run, "MainSim.sim not found", warn);
+            return;
+        }
+
+        RunHooks.Configure(e => RunEvents(e), warn, simField);
+        Patch("Logger.WriteLog", typeof(global::Logger), "WriteLog", warn, prefix: nameof(RunHooks.WriteLog));
+        Patch("Logger.LogError", typeof(global::Logger), "LogError", warn, prefix: nameof(RunHooks.LogError));
+        Patch("MainSim.StartMainExecution", typeof(MainSim), "StartMainExecution", warn, prefix: nameof(RunHooks.StartMainExecution));
+        Patch("MainSim.StopMainExecution", typeof(MainSim), "StopMainExecution", warn, prefix: nameof(RunHooks.StopMainExecution));
+        Patch("Simulation.StopProgramExecution", typeof(Simulation), "StopProgramExecution", warn, prefix: nameof(RunHooks.StopProgramExecution));
+        Patch("MainSim.StartLeaderboard", typeof(MainSim), "StartLeaderboard", warn,
+            prefix: nameof(RunHooks.StartLeaderboardBegin), finalizer: nameof(RunHooks.StartLeaderboardEnd));
+        Patch("LeaderboardManager.StopLeaderboardRun", typeof(LeaderboardManager), "StopLeaderboardRun", warn, prefix: nameof(RunHooks.StopLeaderboardRun));
+        Patch("Leaderboard.OnPlayerLoaded", typeof(Leaderboard), "OnPlayerLoaded", warn, postfix: nameof(RunHooks.PlayerLoaded));
+    }
+
+    void Patch(string what, Type type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null)
+    {
+        var target = Resolve(Capabilities.Run, Method(type, method), what, warn);
+        if (target == null) return;
+        HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(typeof(RunHooks).GetMethod(name));
+        try
+        {
+            harmony.Patch(target, prefix: Hook(prefix), postfix: Hook(postfix), finalizer: Hook(finalizer));
+        }
+        catch (Exception e)
+        {
+            Fail(Capabilities.Run, $"patching {what} failed ({e.Message})", warn);
+        }
     }
 
     T? Resolve<T>(string capability, T? target, string what, Action<string> warn) where T : class
     {
-        if (target == null)
-        {
-            var reason = $"{what} not found";
-            unavailable[capability] = unavailable.TryGetValue(capability, out var prior) ? $"{prior}; {reason}" : reason;
-            warn($"Capability '{capability}' unavailable: {reason}");
-        }
+        if (target == null) Fail(capability, $"{what} not found", warn);
         return target;
+    }
+
+    void Fail(string capability, string reason, Action<string> warn)
+    {
+        unavailable[capability] = unavailable.TryGetValue(capability, out var prior) ? $"{prior}; {reason}" : reason;
+        warn($"Capability '{capability}' unavailable: {reason}");
     }
 
     public string? UnavailableReason(string capability) =>
@@ -109,6 +168,82 @@ public sealed partial class GameAdapter : IGame
         });
     }
 
+    public Task<List<string>> ListScripts() => MainThread.Run(() =>
+        MainSim.Inst.workspace.codeWindows.Keys.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList());
+
+    static CodeWindow FindScript(string name) =>
+        MainSim.Inst.workspace.codeWindows.TryGetValue(name, out var window)
+            ? window
+            : throw new ToolException($"No Script named '{name}' (names are case-sensitive; see list_scripts).");
+
+    static bool IsBeingRun(CodeWindow window) => window.isExecuting && MainSim.Inst.IsExecuting();
+
+    public Task<string> ReadScript(string name) => MainThread.Run(() => FindScript(name).CodeInput.text);
+
+    public async Task<bool> WriteScript(string name, string code)
+    {
+        var created = await MainThread.Run(() =>
+        {
+            var workspace = MainSim.Inst.workspace;
+            if (workspace.codeWindows.TryGetValue(name, out var existing))
+            {
+                if (IsBeingRun(existing))
+                    throw new ToolException($"Script '{name}' is being run; stop the Run before overwriting it.");
+                existing.ApplyExternalCode(code);
+                return false;
+            }
+
+            if (!Saver.IsValidCodeFileName(name) || name.Length == 0)
+                throw new ToolException($"Invalid Script name '{name}': a Script name must not be empty, start with '.', " +
+                    "end with '.' or a space, contain any of < > : \" / \\ | ? * or control characters, start with a " +
+                    "reserved Windows device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9) or be __builtins__.");
+            if (!workspace.IsValidFileName(name))
+                throw new ToolException($"Script name '{name}' clashes with an open window (names are compared " +
+                    "case-insensitively and documentation windows count too).");
+
+            var offset = -workspace.workspaceContainer.anchoredPosition + (UnityEngine.Vector2)spawnOffsetField!.GetValue(workspace);
+            workspace.OpenCodeWindow(name, code, offset);
+            if (!workspace.codeWindows.ContainsKey(name)) throw new ToolException($"The game did not open a code window for '{name}'.");
+            return true;
+        });
+        await SaveScripts();
+        return created;
+    }
+
+    public async Task DeleteScript(string name)
+    {
+        await MainThread.Run(() =>
+        {
+            var window = FindScript(name);
+            if (IsBeingRun(window)) throw new ToolException($"Script '{name}' is being run; stop the Run before deleting it.");
+            window.GetComponent<Window>().Close();
+        });
+        await SaveScripts();
+    }
+
+    async Task SaveScripts()
+    {
+        if (!await MainThread.Run(() => Saver.SaveCode(MainSim.Inst)).Unwrap())
+            throw new ToolException("Writing the Scripts to disk failed; see the game's save failure notice.");
+    }
+
+    public Task<SyntaxError?> StartRun(string name) => MainThread.Run(() =>
+    {
+        var window = FindScript(name);
+        var main = MainSim.Inst;
+        if (main.IsExecuting())
+            throw new ToolException("A Run is already in progress; use wait_run to wait for it or stop_run to stop it.");
+
+        window.PressExecuteOrStop();
+        if (main.IsExecuting()) return null;
+
+        if (parseExceptionField!.GetValue(window) is not ParseException error)
+            throw new ToolException($"The game did not start the Run of '{name}'.");
+        return new SyntaxError { Message = RunHooks.Plain(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
+    });
+
+    public Task StopRun() => MainThread.Run(() => MainSim.Inst.StopMainExecution());
+
     GameState ReadState()
     {
         // Unity null semantics: a destroyed MainSim compares equal to null but is not a null reference.
@@ -127,7 +262,6 @@ public sealed partial class GameAdapter : IGame
                 Save = OptionHolder.GetString("activeSave", "Save0"),
                 Inventory = Items(main.GetInventory(), includeZero: true),
                 WorldSize = new Vec2 { X = size.x, Y = size.y },
-                Run = new RunState { Status = main.IsExecuting() ? RunState.Running : RunState.Idle },
             };
 
             foreach (var unlock in ResourceManager.GetAllUnlocks()

@@ -39,14 +39,6 @@ public sealed class TileState
     public int Depth { get; set; }
 }
 
-public sealed class RunState
-{
-    public const string Idle = "idle";
-    public const string Running = "running";
-
-    public string Status { get; set; } = Idle;
-}
-
 public sealed class GameState
 {
     public string Save { get; set; } = "";
@@ -58,5 +50,6 @@ public sealed class GameState
     /// <summary>Indexed [y][x]; x grows east and y grows north, like the game's coordinates.</summary>
     public List<List<TileState>> Tiles { get; } = new();
 
-    public RunState Run { get; set; } = new();
+    /// <summary>Filled in by the get_state Tool from the Run tracker, not by the game layer.</summary>
+    public RunSnapshot Run { get; set; } = new();
 }

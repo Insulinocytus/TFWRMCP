@@ -129,7 +129,7 @@ public sealed partial class FakeGame : IGame
                 new TileState { Entity = null, Ground = "dirt", Depth = 2 },
             },
         },
-        Run = new RunState { Status = RunState.Running },
+        Run = new RunSnapshot { Status = RunStatus.Running },
     };
 }
 

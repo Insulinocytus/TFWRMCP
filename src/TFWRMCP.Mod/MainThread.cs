@@ -26,6 +26,13 @@ public static class MainThread
         return true;
     });
 
+    /// <summary>Fire and forget; failures are logged instead of lost.</summary>
+    public static void Post(Action work) => Queue.Enqueue(() =>
+    {
+        try { work(); }
+        catch (Exception e) { UnityEngine.Debug.LogException(e); }
+    });
+
     public static void Drain()
     {
         while (Queue.TryDequeue(out var work)) work();
