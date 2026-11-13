@@ -33,6 +33,11 @@ public static class RunHooks
 
     static PendingLeaderboard? pendingLeaderboard;
 
+    // Steps the Run of the real farm has executed, as of its latest action or its end.
+    static long ticks;
+
+    public static long Ticks => Volatile.Read(ref ticks);
+
     public static void Configure(Action<RunEvent> emitEvent, Action<string> logError)
     {
         emit = emitEvent;
@@ -85,7 +90,8 @@ public static class RunHooks
     {
         if (__instance.IsExecuting()) return;
         stopRequested = false;
-        emit(new RunStarted(__0.GetComponent<Window>().windowName));
+        Volatile.Write(ref ticks, 0);
+        emit(new RunStarted(__0.GetComponent<Window>().windowName, GameAdapter.Items(__instance.GetInventory(), includeZero: true)));
     });
 
     // MainSim.StopMainExecution(), prefix.
@@ -97,11 +103,12 @@ public static class RunHooks
     // Simulation.StopProgramExecution(), prefix: the end of the main simulation's Run, however it came about.
     public static void StopProgramExecution(Simulation __instance) => Safely(nameof(StopProgramExecution), () =>
     {
-        if (startingLeaderboard || __instance.leaderboardType != LeaderboardType.none ||
-            !__instance.IsExecuting() || !IsMainSim(__instance)) return;
+        if (__instance.leaderboardType != LeaderboardType.none || !__instance.IsExecuting() || !IsMainSim(__instance)) return;
+        Volatile.Write(ref ticks, (long)__instance.Execution.GlobalOpCount);
+        if (startingLeaderboard) return;
         var how = stopRequested ? RunEnd.Stopped : RunEnd.Terminated;
         stopRequested = false;
-        emit(new RunEnded(how));
+        emit(new RunEnded(how, GameAdapter.Items(__instance.farm.Items, includeZero: true), Ticks));
     });
 
     // MainSim.StartLeaderboard(LeaderboardStartArgs), prefix and finalizer.
@@ -134,6 +141,70 @@ public static class RunHooks
         var main = MainSim.Inst;
         if (main != null && main.leaderboardManager.IsLeaderBoardScreenOpen) main.leaderboardManager.OkPressed();
         emit(new LeaderboardFinished(pending.ReachedGoal, pending.Seconds, pending.Rank));
-        emit(new RunEnded(pending.Cancelled ? RunEnd.Stopped : RunEnd.Terminated));
+        var inventory = main != null && !main.MightBeSimulating() ? GameAdapter.Items(main.GetInventory(), includeZero: true) : null;
+        emit(new RunEnded(pending.Cancelled ? RunEnd.Stopped : RunEnd.Terminated, inventory, Ticks));
+    }
+
+    /// <summary>What <see cref="ActionEnd"/> needs from before the action: it may end the Run and clear the drones' states.</summary>
+    public struct ActionState
+    {
+        public string? Function;
+        public ProgramState? Program;
+        public bool Unharvestable;
+    }
+
+    static string? ActionName(SideEffect effect)
+    {
+        switch (effect)
+        {
+            case SideEffect.Plant: return "plant";
+            case SideEffect.Harvest: return "harvest";
+            case SideEffect.Move: return "move";
+            case SideEffect.Swap: return "swap";
+            case SideEffect.UseItem: return "use_item";
+            case SideEffect.Place: return "place";
+            case SideEffect.Dig: return "dig";
+            case SideEffect.Push: return "push";
+            case SideEffect.Unlock: return "unlock";
+            case SideEffect.Hover: return "hover";
+            default: return null;
+        }
+    }
+
+    // Execution.ApplySideEffect(int droneId), prefix. Actions on the temporary farm of simulate() and Leaderboard Runs are not tracked.
+    public static void ActionBegin(Execution __instance, int __0, out ActionState __state)
+    {
+        __state = default;
+        try
+        {
+            var sim = __instance.sim;
+            if (sim.leaderboardType != LeaderboardType.none || !IsMainSim(sim)) return;
+            Volatile.Write(ref ticks, (long)__instance.GlobalOpCount);
+            var program = __instance.States[__0];
+            var function = ActionName(program.currentSideEffect);
+            if (function == null) return;
+            __state.Function = function;
+            __state.Program = program;
+            // Harvesting something unripe returns True, so only the entity says whether it failed.
+            __state.Unharvestable = program.currentSideEffect == SideEffect.Harvest && !sim.farm.drones[__0].CanHarvest();
+        }
+        catch (Exception e)
+        {
+            log($"Run hook {nameof(ActionBegin)} failed: {e}");
+        }
+    }
+
+    // Execution.ApplySideEffect(int droneId), postfix; an action that throws a Script error never gets here.
+    public static void ActionEnd(ActionState __state)
+    {
+        if (__state.Function == null) return;
+        try
+        {
+            if (__state.Unharvestable || __state.Program!.ReturnValue is PyBool { num: 0 }) emit(new ActionFailed(__state.Function));
+        }
+        catch (Exception e)
+        {
+            log($"Run hook {nameof(ActionEnd)} failed: {e}");
+        }
     }
 }

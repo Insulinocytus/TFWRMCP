@@ -105,6 +105,9 @@ public interface IGame
     /// </summary>
     event Action<RunEvent> RunEvents;
 
+    /// <summary>Game steps the Run in progress has executed so far, as <see cref="RunEnded.Ticks"/> counts them; never blocks.</summary>
+    long RunTicks { get; }
+
     /// <summary>
     /// Looks the Unlock up as the research menu does and, in the same game tick, buys or upgrades it (including its
     /// hat) when <paramref name="whyNot"/> returns null for its facts. Facts are null when no such Unlock is listed.

@@ -29,6 +29,8 @@ public sealed partial class GameAdapter : IGame
     readonly Harmony harmony = new("com.insulinocytus.tfwrmcp");
     readonly Action<string> info;
 
+    public long RunTicks => RunHooks.Ticks;
+
     public event Action<RunEvent> RunEvents = delegate { };
 
     /// <summary>
@@ -86,6 +88,7 @@ public sealed partial class GameAdapter : IGame
             prefix: nameof(RunHooks.StartLeaderboardBegin), finalizer: nameof(RunHooks.StartLeaderboardEnd));
         Patch("LeaderboardManager", "StopLeaderboardRun", warn, prefix: nameof(RunHooks.StopLeaderboardRun));
         Patch("Leaderboard", "OnPlayerLoaded", warn, postfix: nameof(RunHooks.PlayerLoaded));
+        Patch("Execution", "ApplySideEffect", warn, prefix: nameof(RunHooks.ActionBegin), postfix: nameof(RunHooks.ActionEnd));
     }
 
     void Patch(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null)
@@ -270,7 +273,8 @@ public sealed partial class GameAdapter : IGame
             var size = grid.WorldSize;
             var state = new GameState();
             if (parts.HasFlag(StateParts.Save)) state.Save = ActiveSave();
-            if (parts.HasFlag(StateParts.Inventory)) state.Inventory = Items(main.GetInventory(), includeZero: true);
+            // During simulate() and Leaderboard Runs the live sim is a temporary farm; the Agent's inventory is the stored one.
+            if (parts.HasFlag(StateParts.Inventory)) state.Inventory = Items((main.storedSim ?? sim).farm.Items, includeZero: true);
             if (parts.HasFlag(StateParts.WorldSize)) state.WorldSize = new Vec2 { X = size.x, Y = size.y };
 
             if (parts.HasFlag(StateParts.Unlocks))
@@ -314,7 +318,7 @@ public sealed partial class GameAdapter : IGame
         }
     }
 
-    static Dictionary<string, double> Items(ItemBlock? block, bool includeZero)
+    internal static Dictionary<string, double> Items(ItemBlock? block, bool includeZero)
     {
         var result = new Dictionary<string, double>();
         if (block?.items == null) return result;

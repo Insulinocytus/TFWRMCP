@@ -17,6 +17,20 @@ public static partial class Tools
         "afterwards the result has status 'running' and the Run keeps going in the game. 0 does not wait: it " +
         "returns right away.";
 
+    const string RunSummaryDescription =
+        "inventory_delta (item name to net change since the Run began, non-zero items only: the farm's current " +
+        "inventory, or its inventory when the Run ended, minus the inventory when it began, so it includes every " +
+        "change: Script actions, the game's own production and consumption such as water, fertilizer and power, " +
+        "Unlocks bought in the research menu and the cost of unlock() calls; absent when unknown), failed_calls " +
+        "(function name to count, non-zero only: a plant, harvest, move, swap, use_item, place, dig, push, " +
+        "unlock or hover call that returned False counts once; harvest() on an entity that is not harvestable " +
+        "also counts as a failed harvest, because the game then returns True, clears the crop and yields " +
+        "nothing; till() has no return value and is not counted), ticks (game steps the Run has executed, the " +
+        "unit of get_tick_count()) and seconds (real elapsed time); ticks and seconds stop growing when the Run " +
+        "ends. Actions and items on the temporary farm of simulate() and Leaderboard Runs do not count; Runs " +
+        "started by the human do. parse_error results have none of these. Use them to notice a Script that " +
+        "spins without progress, e.g. plant() failing on occupied tiles while items are consumed.";
+
     const string UntilInventoryDescription =
         "Item name to amount, e.g. {\"carrot\": 600}: the inventory must hold at least that much of every listed " +
         "item. The wait then also ends as soon as this holds (or the Run ends, or the timeout passes), and the " +
@@ -127,7 +141,8 @@ public static partial class Tools
             "starting a Run) and, when the Script ran leaderboard_run(), leaderboard (reached_goal, average_seconds, " +
             "rank or null without Steam). A runtime error stops the Run automatically. The Leaderboard result page " +
             "is closed automatically. To run until the inventory reaches a target, pass until_inventory (and " +
-            "stop_when_met to stop the Run then) instead of polling get_state.",
+            "stop_when_met to stop the Run then) instead of polling get_state. The Run also carries a summary: " +
+            RunSummaryDescription,
             WaitSchema(("name", "string", "Script name (case-sensitive).", true)),
             async (args, cancel) =>
             {
@@ -142,7 +157,8 @@ public static partial class Tools
         new Tool(
             "wait_run",
             "Waits again for the latest Run (see run_script) and returns it. When the Run has already ended it " +
-            "returns its final result immediately. Takes the same until_inventory and stop_when_met as run_script.",
+            "returns its final result immediately. Takes the same until_inventory and stop_when_met as run_script, " +
+            "and returns the same Run, including its summary: " + RunSummaryDescription,
             WaitSchema(),
             async (args, cancel) =>
             {
@@ -155,7 +171,7 @@ public static partial class Tools
         new Tool(
             "stop_run",
             "Stops the Run in progress, as if the stop button was clicked, and returns it with status " +
-            "stopped_by_tool. With no Run in progress it just returns the latest Run unchanged.",
+            "stopped_by_tool, with the same summary as run_script: " + RunSummaryDescription + " With no Run in progress it just returns the latest Run unchanged.",
             Schema(),
             async (_, cancel) => await runs.StopByTool(StopTimeout, cancel),
             Capabilities.Run),

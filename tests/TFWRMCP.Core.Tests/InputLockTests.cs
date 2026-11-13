@@ -125,10 +125,10 @@ public class InputLockTests
     public async Task F10_during_any_Tool_stops_a_Run_that_an_earlier_call_left_running()
     {
         var game = GameWithNeverEndingScript();
-        game.GetStateBlocker = new TaskCompletionSource<bool>();
         using var s = new TestServer(game);
         await Ok(s, "run_script", new JObject { ["name"] = "main", ["timeout_seconds"] = 0.05 });
         Assert.True(game.RunActive);
+        game.GetStateBlocker = new TaskCompletionSource<bool>();
 
         var call = s.Call("get_state");
         await game.WaitForLock("get_state");
