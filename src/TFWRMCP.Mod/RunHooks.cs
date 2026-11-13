@@ -56,16 +56,15 @@ public static class RunHooks
         catch (Exception e) { log($"Run hook {hook} failed: {e}"); }
     }
 
+    /// <summary>Game text carries TextMeshPro syntax-colour tags for its UI; the Agent gets plain text.</summary>
+    public static string Plain(string text) => CodeUtilities.RemoveSyntaxTags(text);
+
     // Logger.WriteLog(string logMessage, bool addSeparator), prefix.
     public static void WriteLog(global::Logger __instance, string __0, bool __1) => Safely(nameof(WriteLog), () =>
     {
         if (!IsMainLogger(__instance)) return;
-        var message = __1 ? __0 + "\n" + Separator : __0;
-        if (message.Length > global::Logger.MESSAGE_LENGTH_LIMIT)
-        {
-            message = CodeUtilities.RemoveSyntaxTags(message);
-            if (message.Length > global::Logger.MESSAGE_LENGTH_LIMIT) message = message.Substring(0, global::Logger.MESSAGE_LENGTH_LIMIT);
-        }
+        var message = Plain(__1 ? __0 + "\n" + Separator : __0);
+        if (message.Length > global::Logger.MESSAGE_LENGTH_LIMIT) message = message.Substring(0, global::Logger.MESSAGE_LENGTH_LIMIT);
         emit(new RunOutput(message));
     });
 
@@ -83,7 +82,7 @@ public static class RunHooks
 
         var sim = (Simulation?)simField.GetValue(MainSim.Inst);
         var execution = sim?.Execution;
-        emit(new RunErrored(__0, stack, window?.fileName, window?.CodeInput.text, start));
+        emit(new RunErrored(Plain(__0), Plain(stack), window?.fileName, window?.CodeInput.text, start));
         MainThread.Post(() => StopAfterError(execution));
     });
 

@@ -246,21 +246,23 @@ def check_run_output_buffer(mcp):
         len(run["output"]), run["output"][-1:], run.get("output_dropped"))
 
 
-def check_leaderboard_run(mcp):
-    if not os.path.isdir(SAVES_DIR):
-        print("    skipped: Saves directory not found")
-        return
-    # A fresh Save has no Leaderboard Unlock; give the throwaway test Save one on disk. load_save writes the Save
-    # being left, so switch away first, edit the test Save's file, then load it back.
+def check_grant_unlocks(mcp):
+    # A fresh Save lacks print/range/simulate/leaderboards. Give the throwaway test Save the original Save's Unlocks
+    # (plus the Leaderboard) on disk: load_save writes the Save being left, so switch away, edit, load it back.
+    assert os.path.isdir(SAVES_DIR), f"Saves directory not found: {SAVES_DIR}"
     ok(mcp, "load_save", name=mcp.original_save)
+    with open(os.path.join(SAVES_DIR, mcp.original_save, "save.json"), encoding="utf-8") as f:
+        unlocks = json.load(f)["unlocks"]
     path = os.path.join(SAVES_DIR, mcp.test_save, "save.json")
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    data["unlocks"] += [u for u in ("simulation", "leaderboard") if u not in data["unlocks"]]
+    data["unlocks"] = sorted(set(unlocks) | set(data["unlocks"]) | {"simulation", "leaderboard"})
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
     ok(mcp, "load_save", name=mcp.test_save)
 
+
+def check_leaderboard_run(mcp):
     ok(mcp, "write_script", name="smoke_lb_target", code="pass\n")
     # simulate() is not a Leaderboard Run: the Run just finishes, with no result attached.
     sim = run_wait(mcp, "smoke_sim", "print(simulate('smoke_lb_target', {}, {}, {}, -1, 1000))\nprint('after simulate')\n")
@@ -294,7 +296,8 @@ def check_save_switch_ends_run(mcp):
 
 
 CHECKS = [
-    check_handshake, check_tools_list, check_get_state, check_saves, check_scripts, check_run_finishes,
+    check_handshake, check_tools_list, check_get_state, check_saves, check_scripts, check_grant_unlocks,
+    check_run_finishes,
     check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
     check_leaderboard_run, check_save_switch_ends_run,
 ]

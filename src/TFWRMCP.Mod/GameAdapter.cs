@@ -238,7 +238,7 @@ public sealed class GameAdapter : IGame
 
         if (parseExceptionField!.GetValue(window) is not ParseException error)
             throw new ToolException($"The game did not start the Run of '{name}'.");
-        return new SyntaxError { Message = Localizer.Localize(error.Message), Source = window.CodeInput.text, StartIndex = error.startIndex };
+        return new SyntaxError { Message = RunHooks.Plain(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
     });
 
     public Task StopRun() => MainThread.Run(() => MainSim.Inst.StopMainExecution());
