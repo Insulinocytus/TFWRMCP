@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Newtonsoft.Json;
 
 namespace TFWRMCP;
 
@@ -26,14 +27,15 @@ public sealed class DroneState
     public int Depth { get; set; }
 }
 
+/// <summary>One tile; in JSON a missing entity means the tile is empty and a missing depth means 0.</summary>
 public sealed class TileState
 {
-    public int X { get; set; }
-    public int Y { get; set; }
-
-    /// <summary>Entity name, null when the tile is empty.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public string? Entity { get; set; }
+
     public string Ground { get; set; } = "";
+
+    [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
     public int Depth { get; set; }
 }
 
@@ -52,6 +54,9 @@ public sealed class GameState
     public List<UnlockState> Unlocks { get; } = new();
     public Vec2 WorldSize { get; set; } = new();
     public List<DroneState> Drones { get; } = new();
-    public List<TileState> Tiles { get; } = new();
+
+    /// <summary>Indexed [y][x]; x grows east and y grows north, like the game's coordinates.</summary>
+    public List<List<TileState>> Tiles { get; } = new();
+
     public RunState Run { get; set; } = new();
 }

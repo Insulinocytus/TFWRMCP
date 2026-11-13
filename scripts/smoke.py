@@ -103,8 +103,8 @@ def check_get_state(mcp):
     assert state["save"] and isinstance(state["inventory"], dict)
     size = state["world_size"]
     assert size["x"] > 0 and size["y"] > 0, size
-    assert len(state["tiles"]) == size["x"] * size["y"], "tile count != world size"
-    assert all("x" in t and "y" in t and t["ground"] for t in state["tiles"])
+    assert len(state["tiles"]) == size["y"] and all(len(row) == size["x"] for row in state["tiles"]), "tiles != world size"
+    assert all(tile["ground"] for row in state["tiles"] for tile in row)
     assert state["drones"], "no drone"
     assert all(0 <= d["x"] < size["x"] and 0 <= d["y"] < size["y"] for d in state["drones"])
     assert state["unlocks"] and all({"name", "level", "max_level", "next_cost"} <= u.keys() for u in state["unlocks"])

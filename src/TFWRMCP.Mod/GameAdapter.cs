@@ -79,18 +79,18 @@ public sealed class GameAdapter : IGame
 
             for (var y = 0; y < size.y; y++)
             {
+                var row = new List<TileState>(size.x);
                 for (var x = 0; x < size.x; x++)
                 {
                     ref var cell = ref grid.CellAt(x, y);
-                    state.Tiles.Add(new TileState
+                    row.Add(new TileState
                     {
-                        X = x,
-                        Y = y,
                         Entity = cell.entity?.objectSO.objectName,
                         Ground = grid.GroundAt(x, y).groundSo?.objectName ?? "",
                         Depth = cell.depth,
                     });
                 }
+                state.Tiles.Add(row);
             }
 
             return state;

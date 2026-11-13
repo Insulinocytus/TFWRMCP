@@ -19,8 +19,10 @@ public static class Tools
         new Tool(
             "get_state",
             "Returns a snapshot of the game as the player sees it: current Save name, inventory, every Unlock " +
-            "with its level and the cost of the next level, world size, drone positions, the entity and ground " +
-            "type of every tile, and whether a Run is in progress.",
+            "with its level and the cost of the next level (null at max level), world size, drone positions, " +
+            "whether a Run is in progress (run.status), and the grid as tiles[y][x] (x grows east, y grows " +
+            "north). Each tile has the ground type, plus the entity type unless the tile is empty and the " +
+            "depth unless it is 0.",
             NoArguments(),
             async _ => await game.GetState(),
             Capabilities.State),

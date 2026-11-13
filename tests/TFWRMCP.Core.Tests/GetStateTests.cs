@@ -28,17 +28,21 @@ public class GetStateTests
         Assert.Equal(20, (double)unlocks[1]!["next_cost"]!["wood"]!);
 
         Assert.Equal(2, (int)state["world_size"]!["x"]!);
-        Assert.Equal(1, (int)state["world_size"]!["y"]!);
+        Assert.Equal(2, (int)state["world_size"]!["y"]!);
 
         var drone = Assert.Single(state["drones"]!);
         Assert.Equal((0, 1, 0, 0), ((int)drone["id"]!, (int)drone["x"]!, (int)drone["y"]!, (int)drone["depth"]!));
 
         var tiles = state["tiles"]!;
         Assert.Equal(2, tiles.Count());
-        Assert.Equal("grass", (string)tiles[0]!["entity"]!);
-        Assert.Equal("grassland", (string)tiles[0]!["ground"]!);
-        Assert.Equal(JTokenType.Null, tiles[1]!["entity"]!.Type);
-        Assert.Equal("soil", (string)tiles[1]!["ground"]!);
+        Assert.Equal("grass", (string)tiles[0]![0]!["entity"]!);
+        Assert.Equal("grassland", (string)tiles[0]![0]!["ground"]!);
+        Assert.Null(tiles[0]![0]!["depth"]);
+        Assert.Null(tiles[0]![1]!["entity"]);
+        Assert.Equal("soil", (string)tiles[0]![1]!["ground"]!);
+        Assert.Equal("tree", (string)tiles[1]![0]!["entity"]!);
+        Assert.Equal("dirt", (string)tiles[1]![1]!["ground"]!);
+        Assert.Equal(2, (int)tiles[1]![1]!["depth"]!);
 
         Assert.Equal("running", (string)state["run"]!["status"]!);
     }

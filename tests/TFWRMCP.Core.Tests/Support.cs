@@ -52,12 +52,20 @@ public sealed class FakeGame : IGame
                 NextCost = new Dictionary<string, double> { ["wood"] = 20 },
             },
         },
-        WorldSize = new Vec2 { X = 2, Y = 1 },
+        WorldSize = new Vec2 { X = 2, Y = 2 },
         Drones = { new DroneState { Id = 0, X = 1, Y = 0, Depth = 0 } },
         Tiles =
         {
-            new TileState { X = 0, Y = 0, Entity = "grass", Ground = "grassland", Depth = 0 },
-            new TileState { X = 1, Y = 0, Entity = null, Ground = "soil", Depth = 0 },
+            new List<TileState>
+            {
+                new TileState { Entity = "grass", Ground = "grassland" },
+                new TileState { Entity = null, Ground = "soil" },
+            },
+            new List<TileState>
+            {
+                new TileState { Entity = "tree", Ground = "grassland" },
+                new TileState { Entity = null, Ground = "dirt", Depth = 2 },
+            },
         },
         Run = new RunState { Status = RunState.Running },
     };
