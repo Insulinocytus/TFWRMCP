@@ -40,6 +40,9 @@ moment, so "run until carrot ≥ 600, then stop" is a single call.
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.
 
+`list_builtins` tells which functions, keywords and members (Entities, Items, Grounds, Hats) a script can use right
+now, and for every other name which Unlocks grant it and at what level (for example `for` needs `expand` level 2).
+
 ## Input Lock
 
 While a tool call runs, the game ignores your mouse, keyboard, hotkeys and scroll wheel, and a lock icon shows in

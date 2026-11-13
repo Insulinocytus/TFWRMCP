@@ -26,4 +26,8 @@ public sealed partial class FakeGame
 
     public Task<string> ReadDoc(string page) =>
         Docs.TryGetValue(page, out var text) ? Task.FromResult(text) : throw new ToolException($"No doc page '{page}'.");
+
+    public BuiltinList Builtins { get; set; } = new();
+
+    public Task<BuiltinList> ListBuiltins() => Task.FromResult(Builtins);
 }

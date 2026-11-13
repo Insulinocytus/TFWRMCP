@@ -54,5 +54,29 @@ public static partial class Tools
                 return new { page, content = await game.ReadDoc(page) };
             },
             Capabilities.Docs),
+        new Tool(
+            "list_builtins",
+            "Lists which functions, keywords and members (Entities, Items, Grounds, Hats) a Script can use right now " +
+            "(available), and for every other name the Unlocks that grant it with the level needed (locked), e.g. " +
+            "\"for\" needs Unlock expand at level 2. Operators (%, and, or, not) are one keyword, operators; syntax " +
+            "for variables, lists, dicts and sets is listed as variables, lists, dicts and sets. Names are spelled as in a Script.",
+            Schema(),
+            async (_, _) =>
+            {
+                var builtins = await game.ListBuiltins();
+                var locked = new JObject();
+                foreach (var (name, grants) in builtins.Locked)
+                    locked[name] = new JArray(grants.Select(g => new JObject { ["unlock"] = g.Unlock, ["level"] = g.Level }));
+                return new
+                {
+                    available = new
+                    {
+                        functions = builtins.Functions, keywords = builtins.Keywords, entities = builtins.Entities,
+                        items = builtins.Items, grounds = builtins.Grounds, hats = builtins.Hats,
+                    },
+                    locked,
+                };
+            },
+            Capabilities.Builtins),
     };
 }

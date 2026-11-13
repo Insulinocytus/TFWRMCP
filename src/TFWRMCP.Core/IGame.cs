@@ -14,6 +14,7 @@ public static class Capabilities
     public const string Run = "run";
     public const string Unlock = "unlock";
     public const string Docs = "docs";
+    public const string Builtins = "builtins";
 
     /// <summary>Dismissing the title menu; needed by every Tool, but only when the menu is actually open.</summary>
     public const string TitleMenu = "title_menu";
@@ -125,6 +126,9 @@ public interface IGame
 
     /// <summary>The page as the game's docs window shows it (placeholder for locked content); throws ToolException if there is no such page.</summary>
     Task<string> ReadDoc(string page);
+
+    /// <summary>The names usable in a Script right now, and for the others which Unlocks grant them (and at which level).</summary>
+    Task<BuiltinList> ListBuiltins();
 }
 
 /// <summary>Thrown by Tools and Game implementations for failures the Agent should see verbatim.</summary>
@@ -139,4 +143,25 @@ public sealed class SyntaxError
     public string Message { get; set; } = "";
     public string Source { get; set; } = "";
     public int StartIndex { get; set; }
+}
+
+/// <summary>An Unlock that grants a name once it reaches <see cref="Level"/>.</summary>
+public sealed class UnlockGrant
+{
+    public string Unlock { get; set; } = "";
+    public int Level { get; set; }
+}
+
+/// <summary>Names a Script can use, spelled as in a Script. Names the game does not register for Scripts are absent.</summary>
+public sealed class BuiltinList
+{
+    public List<string> Functions { get; } = new();
+    public List<string> Keywords { get; } = new();
+    public List<string> Entities { get; } = new();
+    public List<string> Items { get; } = new();
+    public List<string> Grounds { get; } = new();
+    public List<string> Hats { get; } = new();
+
+    /// <summary>Names not usable yet, by every Unlock that grants them.</summary>
+    public Dictionary<string, List<UnlockGrant>> Locked { get; } = new();
 }
