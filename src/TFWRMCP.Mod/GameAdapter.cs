@@ -298,11 +298,19 @@ public sealed partial class GameAdapter : IGame
                     for (var x = 0; x < size.x; x++)
                     {
                         ref var cell = ref grid.CellAt(x, y);
+                        var entity = cell.entity;
+                        var harvestable = entity?.Harvestable ?? false;
                         row.Add(new TileState
                         {
-                            Entity = cell.entity?.objectSO.objectName,
+                            Entity = entity?.objectSO.objectName,
                             Ground = grid.GroundAt(x, y).groundSo?.objectName ?? "",
                             Depth = cell.depth,
+                            Harvestable = harvestable,
+                            Water = Math.Round(cell.waterVolume, 2),
+                            // Same rule as the game's hover tooltip: every Growable except Apple.
+                            Grown = entity is Growable growable && entity.objectSO.className != "Apple" && !harvestable
+                                ? Math.Round(Math.Min(growable.GrownPercent, 1.0), 2)
+                                : null,
                         });
                     }
                     state.Tiles.Add(row);

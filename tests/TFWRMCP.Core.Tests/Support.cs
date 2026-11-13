@@ -133,12 +133,12 @@ public sealed partial class FakeGame : IGame
         {
             new List<TileState>
             {
-                new TileState { Entity = "grass", Ground = "grassland" },
+                new TileState { Entity = "grass", Ground = "grassland", Harvestable = true },
                 new TileState { Entity = null, Ground = "soil" },
             },
             new List<TileState>
             {
-                new TileState { Entity = "tree", Ground = "grassland" },
+                new TileState { Entity = "tree", Ground = "grassland", Water = 0.25, Grown = 0.5 },
                 new TileState { Entity = null, Ground = "dirt", Depth = 2 },
             },
         },

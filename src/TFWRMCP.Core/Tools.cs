@@ -92,9 +92,12 @@ public static partial class Tools
             "Returns a snapshot of the game as the player sees it: current Save name, inventory, every Unlock " +
             "with its level and the cost of the next level (null at max level), world size, drone positions, " +
             "the latest Run (run: status idle, running, finished, error, stopped_by_tool, stopped_by_user or " +
-            "parse_error, plus script, error and Leaderboard result; use wait_run for its output), and the grid as tiles[y][x] (x grows east, y grows " +
-            "north). Each tile has the ground type, plus the entity type unless the tile is empty and the " +
-            "depth unless it is 0. The full snapshot is large; pass fields to get only what you need.",
+            "parse_error, plus script, error and Leaderboard result; use wait_run for its output), and the grid as tiles[y][x]: " +
+            "the outer array index is y (south to north), the inner index is x (west to east), so tiles[0][0] is (0, 0) " +
+            "and x grows east, y grows north. Each tile has the ground type, plus: the entity type unless the tile is " +
+            "empty; depth unless it is 0; harvestable: true when the entity can be harvested (as can_harvest() says); " +
+            "water (0-1) unless it is 0; grown (0-1) for a growing entity that is not yet mature. " +
+            "The full snapshot is large; pass fields to get only what you need.",
             WithSchema(
                 Schema(("fields", "array", "Top-level fields to return (default: all): save, inventory, unlocks, " +
                     "world_size, drones, tiles, run. Fields not listed are not read from the game.", false)),
