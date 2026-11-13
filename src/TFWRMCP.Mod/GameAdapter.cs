@@ -29,7 +29,21 @@ public sealed partial class GameAdapter : IGame
     readonly Harmony harmony = new("com.insulinocytus.tfwrmcp");
     readonly Action<string> info;
 
-    public long RunTicks => RunHooks.Ticks;
+    /// <summary>
+    /// Read off the simulation thread without the sim lock: Execution is one reference read and GlobalOpCount one aligned
+    /// 8-byte read (never torn on x64), so at worst the value is a step old. The real farm is the stored one during
+    /// simulate() and Leaderboard Runs, whose Execution is gone by then, so the value frozen at the Run's end applies.
+    /// </summary>
+    public long RunTicks
+    {
+        get
+        {
+            var main = MainSim.Inst;
+            if ((object)main == null || simField == null) return RunHooks.Ticks;
+            var execution = (main.storedSim ?? (Simulation?)simField.GetValue(main))?.Execution;
+            return execution == null ? RunHooks.Ticks : (long)execution.GlobalOpCount;
+        }
+    }
 
     public event Action<RunEvent> RunEvents = delegate { };
 
@@ -87,6 +101,7 @@ public sealed partial class GameAdapter : IGame
         Patch("MainSim", "StartLeaderboard", warn,
             prefix: nameof(RunHooks.StartLeaderboardBegin), finalizer: nameof(RunHooks.StartLeaderboardEnd));
         Patch("LeaderboardManager", "StopLeaderboardRun", warn, prefix: nameof(RunHooks.StopLeaderboardRun));
+        Patch("Menu", "LoadSave", warn, prefix: nameof(RunHooks.LoadSave));
         Patch("Leaderboard", "OnPlayerLoaded", warn, postfix: nameof(RunHooks.PlayerLoaded));
         Patch("Execution", "ApplySideEffect", warn, prefix: nameof(RunHooks.ActionBegin), postfix: nameof(RunHooks.ActionEnd));
     }

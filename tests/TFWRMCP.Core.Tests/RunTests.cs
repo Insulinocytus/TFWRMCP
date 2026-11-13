@@ -41,7 +41,7 @@ public class RunToolTests
         {
             game.Emit(new RunOutput("a"));
             game.Emit(new RunOutput("b"));
-            game.Emit(new RunEnded(RunEnd.Terminated));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         };
         using var s = new TestServer(game);
 
@@ -160,7 +160,7 @@ public class RunToolTests
 
         var waiting = s.Call("wait_run", Wait(10));
         game.Emit(new RunOutput("late"));
-        game.Emit(new RunEnded(RunEnd.Terminated));
+        game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         var (isError, text) = await waiting;
 
         Assert.False(isError);
@@ -188,7 +188,7 @@ public class RunToolTests
         game.OnStartRun = _ =>
         {
             game.Emit(new RunOutput("x"));
-            game.Emit(new RunEnded(RunEnd.Terminated));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         };
         using var s = new TestServer(game);
         await Ok(s, "run_script", Run("main"));
@@ -231,7 +231,7 @@ public class RunToolTests
         using var s = new TestServer(game);
         await Ok(s, "run_script", Run("main", 0.05));
 
-        game.Emit(new RunEnded(RunEnd.Stopped));
+        game.Emit(new RunEnded(RunEnd.Stopped, null, 0));
         var run = await Ok(s, "wait_run");
 
         Assert.Equal("stopped_by_user", (string)run["status"]!);
@@ -247,7 +247,7 @@ public class RunToolTests
         var idle = await Ok(s, "stop_run");
         Assert.Equal("idle", (string)idle["status"]!);
 
-        game.OnStartRun = _ => game.Emit(new RunEnded(RunEnd.Terminated));
+        game.OnStartRun = _ => game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         await Ok(s, "run_script", Run("main"));
         var finished = await Ok(s, "stop_run");
 
@@ -281,14 +281,14 @@ public class RunToolTests
         game.OnStartRun = _ =>
         {
             game.Emit(new RunOutput("old"));
-            game.Emit(new RunEnded(RunEnd.Terminated));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         };
         using var s = new TestServer(game);
         await Ok(s, "run_script", Run("main"));
         game.OnStartRun = _ =>
         {
             game.Emit(new RunOutput("new"));
-            game.Emit(new RunEnded(RunEnd.Terminated));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         };
 
         var run = await Ok(s, "run_script", Run("main"));
@@ -303,7 +303,7 @@ public class RunToolTests
         game.OnStartRun = _ =>
         {
             for (var i = 1; i <= 1500; i++) game.Emit(new RunOutput("line " + i));
-            game.Emit(new RunEnded(RunEnd.Terminated));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         };
         using var s = new TestServer(game);
 
@@ -323,7 +323,7 @@ public class RunToolTests
         game.OnStartRun = _ =>
         {
             for (var i = 0; i < 100; i++) game.Emit(new RunOutput(i.ToString()));
-            game.Emit(new RunEnded(RunEnd.Terminated));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         };
         using var s = new TestServer(game);
 
@@ -345,7 +345,7 @@ public class RunToolTests
         game.OnStartRun = _ =>
         {
             game.Emit(new RunOutput("x"));
-            game.Emit(new RunEnded(RunEnd.Terminated));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         };
         await Ok(s, "run_script", Run("main"));
         var after = await Ok(s, "get_state");
@@ -420,7 +420,7 @@ public class LeaderboardRunTests
     {
         var run = await RunLeaderboard(new FakeGame(),
             new LeaderboardFinished(true, 12.5, 7),
-            new RunEnded(RunEnd.Terminated));
+            new RunEnded(RunEnd.Terminated, null, 0));
 
         Assert.Equal("finished", (string)run["status"]!);
         var leaderboard = run["leaderboard"]!;
@@ -434,7 +434,7 @@ public class LeaderboardRunTests
     {
         var run = await RunLeaderboard(new FakeGame(),
             new LeaderboardFinished(true, 3, null),
-            new RunEnded(RunEnd.Terminated));
+            new RunEnded(RunEnd.Terminated, null, 0));
 
         Assert.Equal("finished", (string)run["status"]!);
         Assert.Equal(JTokenType.Null, run["leaderboard"]!["rank"]!.Type);
@@ -446,7 +446,7 @@ public class LeaderboardRunTests
     {
         var run = await RunLeaderboard(new FakeGame(),
             new LeaderboardFinished(false, 99, null),
-            new RunEnded(RunEnd.Terminated));
+            new RunEnded(RunEnd.Terminated, null, 0));
 
         Assert.Equal("finished", (string)run["status"]!);
         Assert.False((bool)run["leaderboard"]!["reached_goal"]!);
@@ -457,7 +457,7 @@ public class LeaderboardRunTests
     {
         var run = await RunLeaderboard(new FakeGame(),
             new LeaderboardFinished(false, 1, null),
-            new RunEnded(RunEnd.Stopped));
+            new RunEnded(RunEnd.Stopped, null, 0));
 
         Assert.Equal("stopped_by_user", (string)run["status"]!);
         Assert.False((bool)run["leaderboard"]!["reached_goal"]!);
@@ -466,7 +466,7 @@ public class LeaderboardRunTests
     [Fact]
     public async Task A_Run_without_a_Leaderboard_Run_has_no_leaderboard_result()
     {
-        var run = await RunLeaderboard(new FakeGame(), new RunEnded(RunEnd.Terminated));
+        var run = await RunLeaderboard(new FakeGame(), new RunEnded(RunEnd.Terminated, null, 0));
 
         Assert.Null(run["leaderboard"]);
     }

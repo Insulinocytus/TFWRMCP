@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Core.Platform;
 
 namespace TFWRMCP.Mod;
 
@@ -19,7 +18,7 @@ public sealed partial class GameAdapter
         ResolveMethods(Capabilities.Builtins, warn,
             ("MainSim", "IsUnlocked"), ("BuiltinFunctions", "get_Functions"), ("BuiltinFunctions", "get_Methods"),
             ("ResourceManager", "GetAllUnlocks"), ("ResourceManager", "GetAllEntitites"), ("ResourceManager", "GetAllItems"),
-            ("ResourceManager", "GetAllGrounds"), ("ResourceManager", "GetAllHats"));
+            ("ResourceManager", "GetAllGrounds"), ("ResourceManager", "GetAllHats"), ("CodeUtilities", "ToUpperSnake"));
     }
 
     // The same tests the code window's autocomplete uses (MainSim.IsUnlocked per name), over the tables Scripts resolve names in.
@@ -70,9 +69,7 @@ public sealed partial class GameAdapter
             else existing.Level = Math.Min(existing.Level, level);
         }
 
-        foreach (var unlock in ResourceManager.GetAllUnlocks()
-                     .Where(u => u.enabled && PlatformManager.IsDlcInstalled(u.dlc))
-                     .OrderBy(u => u.order).ThenBy(u => u.unlockName))
+        foreach (var unlock in ListedUnlocks())
         {
             Grant(unlock.unlockName, unlock, 1);
             if (!string.IsNullOrEmpty(unlock.unlockedHat)) Grant(unlock.unlockedHat, unlock, 1);

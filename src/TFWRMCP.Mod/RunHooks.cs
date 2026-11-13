@@ -33,7 +33,7 @@ public static class RunHooks
 
     static PendingLeaderboard? pendingLeaderboard;
 
-    // Steps the Run of the real farm has executed, as of its latest action or its end.
+    // Steps the latest Run of the real farm executed, frozen when it ends; while it runs, GameAdapter.RunTicks reads the live count.
     static long ticks;
 
     public static long Ticks => Volatile.Read(ref ticks);
@@ -116,6 +116,9 @@ public static class RunHooks
 
     public static void StartLeaderboardEnd() => startingLeaderboard = false;
 
+    // Menu.LoadSave(string), prefix: the human's Save chooser, the Tools and every new scene's Menu.Start all come through here.
+    public static void LoadSave() => Safely(nameof(LoadSave), () => emit(new SaveLoading()));
+
     // LeaderboardManager.StopLeaderboardRun(bool finished, string, string, TimeSpan), prefix (the Steam rank may arrive during the call).
     public static void StopLeaderboardRun(bool __0, TimeSpan __3) => Safely(nameof(StopLeaderboardRun), () =>
     {
@@ -179,7 +182,6 @@ public static class RunHooks
         {
             var sim = __instance.sim;
             if (sim.leaderboardType != LeaderboardType.none || !IsMainSim(sim)) return;
-            Volatile.Write(ref ticks, (long)__instance.GlobalOpCount);
             var program = __instance.States[__0];
             var function = ActionName(program.currentSideEffect);
             if (function == null) return;

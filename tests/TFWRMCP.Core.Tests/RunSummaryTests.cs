@@ -164,4 +164,35 @@ public class RunSummaryTests
             foreach (var field in new[] { "inventory_delta", "failed_calls", "ticks", "seconds" })
                 Assert.Null(run[field]);
     }
+
+    [Fact]
+    public async Task A_Save_the_human_switches_to_forgets_the_Run_and_its_summary()
+    {
+        var game = GameWithScript();
+        using var s = new TestServer(game);
+        await Ok(s, "run_script", Run(timeout: 0));
+        game.Emit(new ActionFailed("plant"));
+
+        game.Emit(new SaveLoading());
+        var state = await Ok(s, "get_state", new JObject { ["fields"] = new JArray("run") });
+
+        Assert.Equal("idle", (string)state["run"]!["status"]!);
+        foreach (var field in new[] { "inventory_delta", "failed_calls", "ticks", "seconds" })
+            Assert.Null(state["run"]![field]);
+    }
+
+    [Fact]
+    public async Task Get_state_reads_the_inventory_once_so_it_agrees_with_inventory_delta()
+    {
+        var game = GameWithScript();
+        game.OnStartRun = _ => game.State.Inventory["wood"] = 4;
+        using var s = new TestServer(game);
+        await Ok(s, "run_script", Run(timeout: 0));
+        var before = game.Calls;
+
+        var state = await Ok(s, "get_state", new JObject { ["fields"] = new JArray("inventory", "run") });
+
+        Assert.Equal(before + 1, game.Calls);
+        Assert.Equal(new JObject { ["wood"] = 4 }, state["run"]!["inventory_delta"]);
+    }
 }

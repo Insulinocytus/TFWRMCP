@@ -51,12 +51,14 @@ public sealed partial class GameAdapter
 
         lock (lockField!.GetValue(main))
         {
-            var tree = new UnlockTree { Inventory = Items(main.GetInventory(), includeZero: true) };
+            // During simulate() and Leaderboard Runs the live sim is a temporary farm; the Agent's farm is the stored one.
+            var farm = (main.storedSim ?? sim).farm;
+            var tree = new UnlockTree { Inventory = Items(farm.Items, includeZero: true) };
             foreach (var unlock in ListedUnlocks())
             {
-                var node = new UnlockNode { State = Describe(unlock, main.NumUnlocked(unlock.unlockName)) };
+                var node = new UnlockNode { State = Describe(unlock, farm.NumUnlocked(unlock.unlockName)) };
                 for (var owned = 0; owned < unlock.maxUnlockLevel; owned++)
-                    node.LevelCosts.Add(Items(sim.farm.GetUnlockCost(unlock, owned), includeZero: false));
+                    node.LevelCosts.Add(Items(farm.GetUnlockCost(unlock, owned), includeZero: false));
                 tree.Nodes[unlock.unlockName] = node;
             }
             return tree;

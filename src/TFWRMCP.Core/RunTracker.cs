@@ -173,6 +173,13 @@ public sealed class RunTracker
         var stopAfterError = false;
         lock (gate)
         {
+            if (e is SaveLoading)
+            {
+                current.Over.TrySetResult(true);
+                current = new Record();
+                return;
+            }
+
             if (e is RunStarted started)
             {
                 current.Over.TrySetResult(true);
@@ -246,11 +253,12 @@ public sealed class RunTracker
         }
     }
 
-    public Task<RunSnapshot> Snapshot(bool withOutput)
+    /// <param name="live">The inventory the caller has just read, when it has one; saves reading it again.</param>
+    public Task<RunSnapshot> Snapshot(bool withOutput, Dictionary<string, double>? live = null)
     {
         Record run;
         lock (gate) run = current;
-        return Report(run, withOutput);
+        return Report(run, withOutput, live);
     }
 
     /// <summary>Describes the Run; while it is running its inventory delta needs the current inventory, which <paramref name="live"/> may already hold.</summary>
@@ -333,7 +341,7 @@ public sealed class RunTracker
 
         if (met && goal.StopWhenMet && IsRunning(run))
         {
-            await StopByTool(Tools.StopTimeout, cancel);
+            await StopByTool(run, Tools.StopTimeout, cancel);
             inventory = await ReadInventory();
         }
         var snapshot = await Report(run, withOutput: true, inventory);
@@ -343,19 +351,28 @@ public sealed class RunTracker
     }
 
     /// <summary>Stops the Run in progress on the Agent's behalf and waits for it to end; with no Run in progress it only reports.</summary>
-    public async Task<RunSnapshot> StopByTool(TimeSpan timeout, CancellationToken cancel)
+    public Task<RunSnapshot> StopByTool(TimeSpan timeout, CancellationToken cancel)
     {
         Record run;
-        bool running;
+        lock (gate) run = current;
+        return StopByTool(run, timeout, cancel);
+    }
+
+    /// <summary>Only stops <paramref name="run"/> while it is still the current Run: it may have ended and been replaced since it was captured.</summary>
+    async Task<RunSnapshot> StopByTool(Record run, TimeSpan timeout, CancellationToken cancel)
+    {
+        bool stop;
         lock (gate)
         {
-            run = current;
-            running = run.Status == RunStatus.Running;
-            if (running) run.StopRequestedByTool = true;
+            stop = run == current && run.Status == RunStatus.Running;
+            if (stop) run.StopRequestedByTool = true;
         }
-        if (!running) return await Report(run, withOutput: true);
-        await game.StopRun();
-        return await Wait(timeout, cancel);
+        if (stop)
+        {
+            await game.StopRun();
+            await WaitOver(run, timeout, cancel);
+        }
+        return await Report(run, withOutput: true);
     }
 
     /// <summary>A Run cannot outlive the loaded Save: stop it, then forget it.</summary>

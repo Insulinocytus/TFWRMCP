@@ -96,10 +96,16 @@ public sealed class RunEnded : RunEvent
     public Dictionary<string, double>? Inventory { get; }
     public long Ticks { get; }
 
-    public RunEnded(RunEnd how, Dictionary<string, double>? inventory = null, long ticks = 0)
+    public RunEnded(RunEnd how, Dictionary<string, double>? inventory, long ticks)
     {
         How = how;
         Inventory = inventory;
         Ticks = ticks;
     }
 }
+
+/// <summary>
+/// The game is about to switch to another Save (a Tool or the human did it), or a scene has just set one up. A Run
+/// cannot outlive the loaded Save, so whatever Run was latest is forgotten, summary included.
+/// </summary>
+public sealed class SaveLoading : RunEvent { }

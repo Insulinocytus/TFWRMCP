@@ -104,7 +104,7 @@ public class InventoryWaitTests
 
         var clock = Stopwatch.StartNew();
         var waiting = Ok(s, "wait_run", Wait(30, 1000, stop: true));
-        _ = Task.Delay(150).ContinueWith(_ => game.Emit(new RunEnded(RunEnd.Terminated)));
+        _ = Task.Delay(150).ContinueWith(_ => game.Emit(new RunEnded(RunEnd.Terminated, null, 0)));
         var run = await waiting;
 
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10));
@@ -118,7 +118,7 @@ public class InventoryWaitTests
     public async Task A_Run_that_already_ended_returns_met_false_at_once()
     {
         var game = GameWith();
-        game.OnStartRun = _ => game.Emit(new RunEnded(RunEnd.Terminated));
+        game.OnStartRun = _ => game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         using var s = new TestServer(game);
 
         var run = await Ok(s, "run_script", new JObject { ["name"] = "main", ["until_inventory"] = new JObject { ["hay"] = 1000 } });
@@ -186,7 +186,7 @@ public class InventoryWaitTests
     public async Task Without_until_inventory_the_result_has_no_inventory_or_met()
     {
         var game = GameWith();
-        game.OnStartRun = _ => game.Emit(new RunEnded(RunEnd.Terminated));
+        game.OnStartRun = _ => game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
         using var s = new TestServer(game);
 
         var run = await Ok(s, "run_script", new JObject { ["name"] = "main" });

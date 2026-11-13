@@ -116,7 +116,8 @@ public static partial class Tools
                 if (parts.HasFlag(StateParts.WorldSize)) result["world_size"] = state.WorldSize;
                 if (parts.HasFlag(StateParts.Drones)) result["drones"] = state.Drones;
                 if (parts.HasFlag(StateParts.Tiles)) result["tiles"] = state.Tiles;
-                if (parts.HasFlag(StateParts.Run)) result["run"] = await runs.Snapshot(withOutput: false);
+                if (parts.HasFlag(StateParts.Run))
+                    result["run"] = await runs.Snapshot(withOutput: false, parts.HasFlag(StateParts.Inventory) ? state.Inventory : null);
                 return result;
             },
             Capabilities.State),
