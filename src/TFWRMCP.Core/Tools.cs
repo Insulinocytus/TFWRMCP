@@ -90,7 +90,8 @@ public static partial class Tools
         new Tool(
             "get_state",
             "Returns a snapshot of the game as the player sees it: current Save name, inventory, every Unlock " +
-            "with its level and the cost of the next level (null at max level), world size, drone positions, " +
+            "with its level, the cost of the next level (null at max level) and its prerequisites (parent: Unlock to own first; " +
+            "also_requires: {name, level}; each omitted when there is none), world size, drone positions, " +
             "the latest Run (run: status idle, running, finished, error, stopped_by_tool, stopped_by_user or " +
             "parse_error, plus script, error and Leaderboard result; use wait_run for its output), and the grid as tiles[y][x]: " +
             "the outer array index is y (south to north), the inner index is x (west to east), so tiles[0][0] is (0, 0) " +

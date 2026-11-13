@@ -10,11 +10,25 @@ public sealed class Vec2
     public int Y { get; set; }
 }
 
+/// <summary>An Unlock's extra purchase requirement: another Unlock at a minimum level.</summary>
+public sealed class UnlockRequirement
+{
+    public string Name { get; set; } = "";
+    public int Level { get; set; }
+}
+
 public sealed class UnlockState
 {
     public string Name { get; set; } = "";
     public int Level { get; set; }
     public int MaxLevel { get; set; }
+
+    /// <summary>Unlock that must be owned first; omitted from JSON when there is none.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public string? Parent { get; set; }
+
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public UnlockRequirement? AlsoRequires { get; set; }
 
     /// <summary>Cost of the next level by item name; null at max level.</summary>
     public Dictionary<string, double>? NextCost { get; set; }

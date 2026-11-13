@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -14,12 +15,53 @@ public sealed partial class GameAdapter
     {
         ResolveMethods(Capabilities.Unlock, warn,
             ("MainSim", "UnlockOrUpgrade"), ("MainSim", "UnlockHat"), ("MainSim", "IsSimulating"), ("MainSim", "GetUnlockCost"),
-            ("MainSim", "NumUnlocked"), ("ResourceManager", "GetUnlock"), ("ResourceManager", "GetHat"));
+            ("MainSim", "NumUnlocked"), ("ResourceManager", "GetUnlock"), ("ResourceManager", "GetHat"), ("Farm", "GetUnlockCost"));
         ResolveMethods(Capabilities.Docs, warn,
             ("Localizer", "Localize"), ("Localizer", "LoadDoc"), ("ResourceManager", "GetUnlockOf"), ("TooltipUtils", "UnlockTooltip"),
             ("TooltipUtils", "ItemTooltip"), ("TooltipUtils", "FarmObjectTooltip"), ("TooltipUtils", "GroundTooltip"),
             ("TooltipUtils", "GetKeywordDocsPage"), ("CodeUtilities", "ToUpperSnake"));
     }
+
+    // The research menu's list (ResearchMenu.Setup).
+    static IEnumerable<UnlockSO> ListedUnlocks() => ResourceManager.GetAllUnlocks()
+        .Where(u => u.enabled && PlatformManager.IsDlcInstalled(u.dlc))
+        .OrderBy(u => u.order).ThenBy(u => u.unlockName);
+
+    static UnlockState Describe(UnlockSO unlock, int level)
+    {
+        var extra = unlock.additionalUnlockRequirement;
+        return new UnlockState
+        {
+            Name = unlock.unlockName,
+            Level = level,
+            MaxLevel = unlock.maxUnlockLevel,
+            Parent = string.IsNullOrEmpty(unlock.parentUnlock) ? null : unlock.parentUnlock,
+            AlsoRequires = extra == null || string.IsNullOrEmpty(extra.unlockName)
+                ? null
+                : new UnlockRequirement { Name = extra.unlockName, Level = extra.level },
+        };
+    }
+
+    public Task<UnlockTree> GetUnlockTree() => MainThread.Run(() =>
+    {
+        var main = MainSim.Inst;
+        if (main == null) throw new ToolException(SceneLoading);
+        var sim = (Simulation?)simField!.GetValue(main);
+        if (sim == null) throw new ToolException("No Save is loaded yet; try again shortly.");
+
+        lock (lockField!.GetValue(main))
+        {
+            var tree = new UnlockTree { Inventory = Items(main.GetInventory(), includeZero: true) };
+            foreach (var unlock in ListedUnlocks())
+            {
+                var node = new UnlockNode { State = Describe(unlock, main.NumUnlocked(unlock.unlockName)) };
+                for (var owned = 0; owned < unlock.maxUnlockLevel; owned++)
+                    node.LevelCosts.Add(Items(sim.farm.GetUnlockCost(unlock, owned), includeZero: false));
+                tree.Nodes[unlock.unlockName] = node;
+            }
+            return tree;
+        }
+    });
 
     // The research menu's UnlockBox.ButtonClicked (minus the reset-to-max cheat branch), preceded by the precheck in the same tick.
     public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot) => MainThread.Run(() =>

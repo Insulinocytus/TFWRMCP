@@ -274,18 +274,11 @@ public sealed partial class GameAdapter : IGame
             if (parts.HasFlag(StateParts.WorldSize)) state.WorldSize = new Vec2 { X = size.x, Y = size.y };
 
             if (parts.HasFlag(StateParts.Unlocks))
-                foreach (var unlock in ResourceManager.GetAllUnlocks()
-                             .Where(u => u.enabled && PlatformManager.IsDlcInstalled(u.dlc))
-                             .OrderBy(u => u.order).ThenBy(u => u.unlockName))
+                foreach (var unlock in ListedUnlocks())
                 {
-                    var level = main.NumUnlocked(unlock.unlockName);
-                    state.Unlocks.Add(new UnlockState
-                    {
-                        Name = unlock.unlockName,
-                        Level = level,
-                        MaxLevel = unlock.maxUnlockLevel,
-                        NextCost = level >= unlock.maxUnlockLevel ? null : Items(main.GetUnlockCost(unlock), includeZero: false),
-                    });
+                    var entry = Describe(unlock, main.NumUnlocked(unlock.unlockName));
+                    if (entry.Level < entry.MaxLevel) entry.NextCost = Items(main.GetUnlockCost(unlock), includeZero: false);
+                    state.Unlocks.Add(entry);
                 }
 
             if (parts.HasFlag(StateParts.Drones))

@@ -27,10 +27,10 @@ The server only listens on localhost. Its settings are in the game's options men
 
 ## Tools
 
-`get_state` returns the Save name, inventory, Unlock levels and next costs, world size, drone positions, every
-tile as `tiles[y][x]` (`tiles[0][0]` is (0, 0); y grows north, x grows east) with its ground, entity, whether it can
-be harvested, water level and growth progress, and the Run status. It is large; pass `fields` (for example
-`["inventory","run"]`) to get only those top-level fields.
+`get_state` returns the Save name, inventory, Unlock levels, next costs and prerequisites (`parent`, `also_requires`),
+world size, drone positions, every tile as `tiles[y][x]` (`tiles[0][0]` is (0, 0); y grows north, x grows east) with
+its ground, entity, whether it can be harvested, water level and growth progress, and the Run status. It is large;
+pass `fields` (for example `["inventory","run"]`) to get only those top-level fields.
 
 `run_script` and `wait_run` end when the Run does, or after `timeout_seconds` (`0` returns right after the Run has
 started). Pass `until_inventory` (for example `{"carrot": 600}`) to also end as soon as the inventory holds at least
@@ -42,6 +42,10 @@ any tool runs, and tools called while the scene reloads wait until the game is p
 
 `list_builtins` tells which functions, keywords and members (Entities, Items, Grounds, Hats) a script can use right
 now, and for every other name which Unlocks grant it and at what level (for example `for` needs `expand` level 2).
+
+`unlock` buys one level of an Unlock, or the Unlocks in `names` in order (it stops at the first failure and keeps
+earlier purchases). `plan_unlock` lists, without buying, every purchase needed to reach an Unlock level (parents and
+required levels first), their total cost and the items you still lack.
 
 ## Input Lock
 
