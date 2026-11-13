@@ -7,7 +7,7 @@ using Newtonsoft.Json.Linq;
 namespace TFWRMCP;
 
 /// <summary>The Tool catalogue; each ticket adds its Tools here.</summary>
-public static class Tools
+public static partial class Tools
 {
     static JObject NoArguments() => new()
     {
@@ -118,5 +118,5 @@ public static class Tools
                 return new { saved = true };
             },
             Capabilities.Saves),
-    };
+    }.Concat(UnlockAndDocsTools(game)).ToArray();
 }

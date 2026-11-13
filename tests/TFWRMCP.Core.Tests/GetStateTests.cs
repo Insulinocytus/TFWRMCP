@@ -113,5 +113,8 @@ public class GetStateTests
         public Task<SyntaxError?> StartRun(string name) => throw new NotSupportedException();
         public Task StopRun() => throw new NotSupportedException();
         public event Action<RunEvent> RunEvents { add { } remove { } }
+        public Task<UnlockFacts?> GetUnlockFacts(string name) => throw new NotSupportedException();
+        public Task<bool> BuyUnlock(string name) => throw new NotSupportedException();
+        public Task<string> ReadDoc(string page) => throw new NotSupportedException();
     }
 }

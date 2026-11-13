@@ -11,7 +11,7 @@ using UnityEngine.SceneManagement;
 namespace TFWRMCP.Mod;
 
 /// <summary>Implements the Game seam against the live game. All game access happens on the Unity main thread.</summary>
-public sealed class GameAdapter : IGame
+public sealed partial class GameAdapter : IGame
 {
     const BindingFlags NonPublic = BindingFlags.Instance | BindingFlags.NonPublic;
 
@@ -44,6 +44,7 @@ public sealed class GameAdapter : IGame
             Resolve(Capabilities.Saves, type.GetMethod(name, Public), $"{type.Name}.{name}", warn);
 
         InstallScriptAndRunSupport(warn);
+        ResolveUnlockDocs(warn);
     }
 
     static MethodInfo? Method(Type type, string name) =>
