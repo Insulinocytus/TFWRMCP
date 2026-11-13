@@ -527,7 +527,7 @@ def check_run_summary(mcp):
 
     # Actions on simulate()'s temporary farm are not counted.
     ok(mcp, "write_script", name="smoke_sim_target", code="for i in range(20):\n    plant(Entities.Bush)\n    harvest()\n")
-    run = run_wait(mcp, "smoke_sim_summary", "simulate('smoke_sim_target', {}, {}, {}, -1, 1000)\n")
+    run = run_wait(mcp, "smoke_sim_summary", "simulate('smoke_sim_target', Unlocks, {}, {}, -1, 1000)\n")
     assert run["status"] == "finished" and run["failed_calls"] == {}, run
 
     # Ticks and seconds stop growing once the Run has ended.
