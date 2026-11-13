@@ -105,5 +105,8 @@ public class GetStateTests
         public Task CreateSave(string name) => throw new NotSupportedException();
         public Task LoadSave(string name) => throw new NotSupportedException();
         public Task SaveGame() => throw new NotSupportedException();
+        public Task<UnlockFacts?> GetUnlockFacts(string name) => throw new NotSupportedException();
+        public Task<bool> BuyUnlock(string name) => throw new NotSupportedException();
+        public Task<string> ReadDoc(string page) => throw new NotSupportedException();
     }
 }

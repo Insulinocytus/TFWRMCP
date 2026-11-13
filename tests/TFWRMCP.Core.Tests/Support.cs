@@ -11,7 +11,7 @@ using TFWRMCP;
 
 namespace TFWRMCP.Core.Tests;
 
-public sealed class FakeGame : IGame
+public sealed partial class FakeGame : IGame
 {
     public GameState State { get; set; } = SampleState();
     public Dictionary<string, string> Unavailable { get; } = new();
