@@ -43,7 +43,8 @@ public interface IGame
     /// <summary>Null when the capability works, otherwise why it does not.</summary>
     string? UnavailableReason(string capability);
 
-    Task<GameState> GetState();
+    /// <summary>Reads only the requested parts of the game; the others are left empty. <see cref="StateParts.Run"/> is ignored.</summary>
+    Task<GameState> GetState(StateParts parts);
 
     Task<GameScene> GetScene();
 
