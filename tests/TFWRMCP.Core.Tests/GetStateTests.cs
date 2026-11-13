@@ -46,6 +46,16 @@ public class GetStateTests
         Assert.Equal("dirt", (string)tiles[1]![1]!["ground"]!);
         Assert.Equal(2, (int)tiles[1]![1]!["depth"]!);
 
+        Assert.True((bool)tiles[0]![0]!["harvestable"]!);
+        Assert.Equal(0.25, (double)tiles[1]![0]!["water"]!);
+        Assert.Equal(0.5, (double)tiles[1]![0]!["grown"]!);
+        foreach (var tile in new[] { tiles[0]![1]!, tiles[1]![1]! })
+            foreach (var name in new[] { "harvestable", "water", "grown" })
+                Assert.Null(tile[name]);
+        Assert.Null(tiles[0]![0]!["water"]);
+        Assert.Null(tiles[0]![0]!["grown"]);
+        Assert.Null(tiles[1]![0]!["harvestable"]);
+
         Assert.Equal("idle", (string)state["run"]!["status"]!);
     }
 
@@ -69,6 +79,52 @@ public class GetStateTests
         var grass = unlocks.Single(u => (string)u["name"]! == "grass");
         Assert.Null(grass["parent"]);
         Assert.Null(grass["also_requires"]);
+    }
+
+    [Fact]
+    public async Task Fields_limit_the_output_and_the_game_only_reads_those_parts()
+    {
+        var game = new FakeGame();
+        using var s = new TestServer(game);
+
+        var (isError, text) = await s.Call("get_state", new JObject { ["fields"] = new JArray("inventory", "run") });
+
+        Assert.False(isError, text);
+        var state = JObject.Parse(text);
+        Assert.Equal(new[] { "inventory", "run" }, state.Properties().Select(p => p.Name));
+        Assert.Equal(12.5, (double)state["inventory"]!["hay"]!);
+        Assert.Equal("idle", (string)state["run"]!["status"]!);
+        Assert.Equal(StateParts.Inventory | StateParts.Run, game.LastParts);
+    }
+
+    [Fact]
+    public async Task Without_fields_every_top_level_field_is_returned_in_the_documented_order()
+    {
+        var game = new FakeGame();
+        using var s = new TestServer(game);
+
+        var (_, text) = await s.Call("get_state");
+
+        Assert.Equal(new[] { "save", "inventory", "unlocks", "world_size", "drones", "tiles", "run" },
+            JObject.Parse(text).Properties().Select(p => p.Name));
+        Assert.Equal(StateParts.All, game.LastParts);
+    }
+
+    [Theory]
+    [InlineData("[\"inventory\", \"bogus\"]")]
+    [InlineData("[3]")]
+    [InlineData("[]")]
+    [InlineData("\"inventory\"")]
+    public async Task Invalid_fields_are_an_error_that_lists_the_options(string fields)
+    {
+        var game = new FakeGame();
+        using var s = new TestServer(game);
+
+        var (isError, text) = await s.Call("get_state", new JObject { ["fields"] = JToken.Parse(fields) });
+
+        Assert.True(isError);
+        Assert.Contains("world_size", text);
+        Assert.Equal(0, game.Calls);
     }
 
     [Fact]
@@ -120,7 +176,7 @@ public class GetStateTests
     sealed class ThrowingGame : IGame
     {
         public string? UnavailableReason(string capability) => null;
-        public Task<GameState> GetState() => throw new ToolException("The game scene is loading.");
+        public Task<GameState> GetState(StateParts parts) => throw new ToolException("The game scene is loading.");
         public Task<GameScene> GetScene() => Task.FromResult(GameScene.Playing);
         public Task CloseTitleMenu() => throw new NotSupportedException();
         public Task<SaveList> ListSaves() => throw new NotSupportedException();

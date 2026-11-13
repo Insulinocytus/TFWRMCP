@@ -118,7 +118,7 @@ public sealed partial class GameAdapter : IGame
     public string? UnavailableReason(string capability) =>
         unavailable.TryGetValue(capability, out var reason) ? reason : null;
 
-    public Task<GameState> GetState() => MainThread.Run(ReadState);
+    public Task<GameState> GetState(StateParts parts) => MainThread.Run(() => ReadState(parts));
 
     public Task<GameScene> GetScene() => MainThread.Run(ReadScene);
 
@@ -255,7 +255,7 @@ public sealed partial class GameAdapter : IGame
         if (MainSim.Inst.IsExecuting()) MainSim.Inst.StopMainExecution();
     });
 
-    GameState ReadState()
+    GameState ReadState(StateParts parts)
     {
         var main = MainSim.Inst;
         if (main == null) throw new ToolException(SceneLoading);
@@ -267,38 +267,47 @@ public sealed partial class GameAdapter : IGame
         {
             var grid = sim.farm.grid;
             var size = grid.WorldSize;
-            var state = new GameState
-            {
-                Save = ActiveSave(),
-                Inventory = Items(main.GetInventory(), includeZero: true),
-                WorldSize = new Vec2 { X = size.x, Y = size.y },
-            };
+            var state = new GameState();
+            if (parts.HasFlag(StateParts.Save)) state.Save = ActiveSave();
+            if (parts.HasFlag(StateParts.Inventory)) state.Inventory = Items(main.GetInventory(), includeZero: true);
+            if (parts.HasFlag(StateParts.WorldSize)) state.WorldSize = new Vec2 { X = size.x, Y = size.y };
 
-            foreach (var unlock in ListedUnlocks())
-            {
-                var entry = Describe(unlock, main.NumUnlocked(unlock.unlockName));
-                if (entry.Level < entry.MaxLevel) entry.NextCost = Items(main.GetUnlockCost(unlock), includeZero: false);
-                state.Unlocks.Add(entry);
-            }
-
-            foreach (var drone in sim.farm.drones.Where(d => d != null))
-                state.Drones.Add(new DroneState { Id = drone.DroneId, X = drone.pos.x, Y = drone.pos.y, Depth = drone.depth });
-
-            for (var y = 0; y < size.y; y++)
-            {
-                var row = new List<TileState>(size.x);
-                for (var x = 0; x < size.x; x++)
+            if (parts.HasFlag(StateParts.Unlocks))
+                foreach (var unlock in ListedUnlocks())
                 {
-                    ref var cell = ref grid.CellAt(x, y);
-                    row.Add(new TileState
-                    {
-                        Entity = cell.entity?.objectSO.objectName,
-                        Ground = grid.GroundAt(x, y).groundSo?.objectName ?? "",
-                        Depth = cell.depth,
-                    });
+                    var entry = Describe(unlock, main.NumUnlocked(unlock.unlockName));
+                    if (entry.Level < entry.MaxLevel) entry.NextCost = Items(main.GetUnlockCost(unlock), includeZero: false);
+                    state.Unlocks.Add(entry);
                 }
-                state.Tiles.Add(row);
-            }
+
+            if (parts.HasFlag(StateParts.Drones))
+                foreach (var drone in sim.farm.drones.Where(d => d != null))
+                    state.Drones.Add(new DroneState { Id = drone.DroneId, X = drone.pos.x, Y = drone.pos.y, Depth = drone.depth });
+
+            if (parts.HasFlag(StateParts.Tiles))
+                for (var y = 0; y < size.y; y++)
+                {
+                    var row = new List<TileState>(size.x);
+                    for (var x = 0; x < size.x; x++)
+                    {
+                        ref var cell = ref grid.CellAt(x, y);
+                        var entity = cell.entity;
+                        var harvestable = entity?.Harvestable ?? false;
+                        row.Add(new TileState
+                        {
+                            Entity = entity?.objectSO.objectName,
+                            Ground = grid.GroundAt(x, y).groundSo?.objectName ?? "",
+                            Depth = cell.depth,
+                            Harvestable = harvestable,
+                            Water = Math.Round(cell.waterVolume, 2),
+                            // Same rule as the game's hover tooltip: every Growable except Apple.
+                            Grown = entity is Growable growable && entity.objectSO.className != "Apple" && !harvestable
+                                ? Math.Round(Math.Min(growable.GrownPercent, 1.0), 2)
+                                : null,
+                        });
+                    }
+                    state.Tiles.Add(row);
+                }
 
             return state;
         }
