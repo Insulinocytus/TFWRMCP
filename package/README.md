@@ -1,0 +1,25 @@
+# TFWRMCP
+
+A BepInEx 5 mod for The Farmer Was Replaced that runs an MCP server inside the game, so an AI agent can play it
+the way a human does: write a script, run it, read the output and state, improve the script.
+
+## Install
+
+Use r2modman (import the zip as a local mod), or copy the `TFWRMCP` folder into `BepInEx/plugins` of a
+BepInEx 5.4.23.x install.
+
+## Connect
+
+Point any MCP client (Streamable HTTP) at `http://127.0.0.1:47821`, for example:
+
+```
+claude mcp add --transport http tfwr http://127.0.0.1:47821
+```
+
+The port can be changed in `BepInEx/config/com.insulinocytus.tfwrmcp.cfg`. If it is already taken, the mod logs an
+error and leaves MCP disabled; the game itself runs normally. The server only listens on localhost.
+
+## Tools
+
+`get_state` returns the Save name, inventory, Unlock levels and next costs, world size, drone positions, every
+tile's entity and ground, and the Run status.
