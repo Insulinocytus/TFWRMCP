@@ -1,0 +1,128 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json.Linq;
+
+namespace TFWRMCP;
+
+/// <summary>The Tool catalogue.</summary>
+public static partial class Tools
+{
+    static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
+
+    static JObject Schema(params (string Name, string Type, string Description, bool Required)[] properties)
+    {
+        var schema = new JObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JObject(),
+            ["additionalProperties"] = false,
+        };
+        var required = new JArray();
+        foreach (var (name, type, description, isRequired) in properties)
+        {
+            ((JObject)schema["properties"]!)[name] = new JObject { ["type"] = type, ["description"] = description };
+            if (isRequired) required.Add(name);
+        }
+        if (required.Count > 0) schema["required"] = required;
+        return schema;
+    }
+
+    static string? OptionalString(JObject args, string name)
+    {
+        var value = args[name];
+        if (value == null || value.Type == JTokenType.Null) return null;
+        return value is JValue { Value: string text } ? text : throw new ToolException($"'{name}' must be a string.");
+    }
+
+    static string RequiredString(JObject args, string name) =>
+        OptionalString(args, name) ?? throw new ToolException($"'{name}' is required.");
+
+    static async Task<object?> LoadAndWait(IGame game, RunTracker runs, string name, CancellationToken cancel)
+    {
+        await runs.ResetForReload(StopTimeout, cancel);
+        await game.LoadSave(name, cancel);
+        await Readiness.Ensure(game, cancel);
+        return new { save = name };
+    }
+
+    public static IReadOnlyList<Tool> Create(IGame game, Action<string> log)
+    {
+        var runs = new RunTracker(game, log);
+        return Catalogue(game, runs).Concat(UnlockAndDocsTools(game)).Concat(ScriptAndRunTools(game, runs)).ToArray();
+    }
+
+    static Tool[] Catalogue(IGame game, RunTracker runs) => new[]
+    {
+        new Tool(
+            "get_state",
+            "Returns a snapshot of the game as the player sees it: current Save name, inventory, every Unlock " +
+            "with its level and the cost of the next level (null at max level), world size, drone positions, " +
+            "the latest Run (run: status idle, running, finished, error, stopped_by_tool, stopped_by_user or " +
+            "parse_error, plus script, error and Leaderboard result; use wait_run for its output), and the grid as tiles[y][x] (x grows east, y grows " +
+            "north). Each tile has the ground type, plus the entity type unless the tile is empty and the " +
+            "depth unless it is 0.",
+            Schema(),
+            async (_, _) =>
+            {
+                var state = await game.GetState();
+                state.Run = runs.Snapshot(withOutput: false);
+                return state;
+            },
+            Capabilities.State),
+        new Tool(
+            "list_saves",
+            "Lists every Save and which one is currently loaded.",
+            Schema(),
+            async (_, _) => await game.ListSaves(),
+            Capabilities.Saves),
+        new Tool(
+            "create_save",
+            "Creates a new Save and loads it, replacing the current game state with a fresh one. The current Save " +
+            "is saved first. Returns once the new Save is loaded and playable.",
+            Schema(("name", "string", "Name of the new Save. Omit to use the game's default name (SaveN).", false)),
+            async (args, cancel) =>
+            {
+                var name = OptionalString(args, "name");
+                if (name == null) name = await game.GenerateSaveName();
+                else if (!await game.IsValidSaveName(name))
+                    throw new ToolException($"Invalid Save name '{name}': a Save name must not be empty, start with '.', " +
+                        "end with '.' or a space, contain any of < > : \" / \\ | ? * or control characters, or start " +
+                        "with a reserved Windows device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9).");
+                if ((await game.ListSaves()).Saves.Any(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase)))
+                    throw new ToolException($"A Save named '{name}' already exists.");
+
+                cancel.ThrowIfCancellationRequested();
+                await game.CreateSave(name);
+                return await LoadAndWait(game, runs, name, cancel);
+            },
+            Capabilities.Saves),
+        new Tool(
+            "load_save",
+            "Saves the current Save, then loads another one. Returns once the loaded Save is playable.",
+            Schema(("name", "string", "Name of an existing Save (see list_saves).", true)),
+            async (args, cancel) =>
+            {
+                var name = RequiredString(args, "name");
+                var saves = (await game.ListSaves()).Saves;
+                var match = saves.FirstOrDefault(s => s == name) ??
+                            saves.FirstOrDefault(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase));
+                if (match == null)
+                    throw new ToolException($"No Save named '{name}'. Existing Saves: {string.Join(", ", saves)}.");
+                return await LoadAndWait(game, runs, match, cancel);
+            },
+            Capabilities.Saves),
+        new Tool(
+            "save_game",
+            "Writes the current Save (progress and Scripts) to disk.",
+            Schema(),
+            async (_, _) =>
+            {
+                await game.SaveGame();
+                return new { saved = true };
+            },
+            Capabilities.Saves),
+    };
+}

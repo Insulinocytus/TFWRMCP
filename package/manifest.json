@@ -1,0 +1,7 @@
+{
+  "name": "TFWRMCP",
+  "version_number": "0.1.0",
+  "website_url": "https://github.com/Insulinocytus/TFWRMCP",
+  "description": "MCP server inside The Farmer Was Replaced: lets an AI agent write scripts, run them and play the game.",
+  "dependencies": ["BepInEx-BepInExPack-5.4.2304"]
+}
