@@ -182,7 +182,7 @@ if (!IsWindowOpen(fileName, ignoreCase: true)) { OpenWindow(codeWinPrefab, ...);
 num = numUnlocked >= 0 ? numUnlocked : NumUnlocked(unlockSO.unlockName);
 if (num >= unlockSO.maxUnlockLevel) return ItemBlock.CreateEmpty();     // max level: empty cost
 if (IsMultiUnlock) { count = multiUnlockCost.Count;
-  if (num > 0) { if (count < num) { cost = multiUnlockCost[count-1] * Pow(multiUnlockFactor, num-count); round each to 3 decimals; TruncateNumbers(); return cost; }
+  if (num > 0) { if (count < num) { cost = multiUnlockCost[count-1] * Pow(multiUnlockFactor, num-count); round each to 3 significant digits (Helper.RoundToNDecimalDigits); TruncateNumbers(); return cost; }
                  return multiUnlockCost[num-1]; } }
 return unlockSO.unlockCost;   // first purchase (num == 0) and single unlocks
 ```
