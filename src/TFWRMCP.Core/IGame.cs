@@ -9,6 +9,8 @@ public static class Capabilities
 {
     public const string State = "state";
     public const string Saves = "saves";
+    public const string Unlock = "unlock";
+    public const string Docs = "docs";
 }
 
 public enum GameScene
@@ -59,6 +61,15 @@ public interface IGame
 
     /// <summary>Writes the current Save to disk; returns once it is persisted.</summary>
     Task SaveGame();
+
+    /// <summary>Facts the Unlock checks need, as the research menu sees the Unlock; null when no such Unlock is listed there.</summary>
+    Task<UnlockFacts?> GetUnlockFacts(string name);
+
+    /// <summary>Buys or upgrades the Unlock exactly like the research menu does (including its hat); false if the game refused.</summary>
+    Task<bool> BuyUnlock(string name);
+
+    /// <summary>The page as the game's docs window shows it (placeholder for locked content); throws ToolException if there is no such page.</summary>
+    Task<string> ReadDoc(string page);
 }
 
 /// <summary>Thrown by Tools and Game implementations for failures the Agent should see verbatim.</summary>

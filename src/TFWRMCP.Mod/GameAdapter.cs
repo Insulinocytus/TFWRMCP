@@ -10,7 +10,7 @@ using UnityEngine.SceneManagement;
 namespace TFWRMCP.Mod;
 
 /// <summary>Implements the Game seam against the live game. All game access happens on the Unity main thread.</summary>
-public sealed class GameAdapter : IGame
+public sealed partial class GameAdapter : IGame
 {
     const BindingFlags NonPublic = BindingFlags.Instance | BindingFlags.NonPublic;
 
@@ -35,6 +35,7 @@ public sealed class GameAdapter : IGame
                      (typeof(SaveChooser), "GenerateUnusedSaveName"), (typeof(Menu), "LoadSave"), (typeof(Menu), "Play"),
                  })
             Resolve(Capabilities.Saves, type.GetMethod(name, Public), $"{type.Name}.{name}", warn);
+        ResolveUnlockDocs(warn);
     }
 
     T? Resolve<T>(string capability, T? target, string what, Action<string> warn) where T : class

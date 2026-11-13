@@ -139,7 +139,48 @@ def check_get_state(mcp):
     print(f"    save={state['save']} world={size['x']}x{size['y']} unlocks={len(state['unlocks'])} run={state['run']['status']}")
 
 
-CHECKS = [check_handshake, check_tools_list, check_get_state, check_saves]
+def check_unlock_failures(mcp):
+    # A fresh Save owns only the starting Unlocks and no items, so every purchase fails (build-specific tree).
+    _, before = mcp.call("get_state")
+    for name, reason in (
+        ("no-such-unlock", "No Unlock named"),
+        ("hats", "requires 'loops'"),
+        ("loops", "Not enough items for 'loops' level 1 (hay: need 5, have 0)"),
+    ):
+        is_error, text = mcp.call("unlock", name=name)
+        assert is_error and reason in text, (name, text)
+    _, after = mcp.call("get_state")
+    assert before["inventory"] == after["inventory"] and before["unlocks"] == after["unlocks"], "failed unlock changed the state"
+
+
+def check_docs(mcp):
+    is_error, listing = mcp.call("list_docs")
+    assert not is_error, listing
+    pages = [p["page"] for p in listing["pages"]]
+    assert len(pages) == len(set(pages)) and all(p["title"] for p in listing["pages"]), listing
+    assert "docs/getting_started.md" in pages and "docs/scripting/for.md" not in pages, pages
+
+    for page in pages:  # everything listed is unlocked, so it reads as a real page, not the placeholder
+        is_error, doc = mcp.call("read_doc", page=page)
+        assert not is_error and doc["page"] == page and doc["content"].strip(), (page, doc)
+        assert "(tech_tree)" not in doc["content"] and "<noparse>" not in doc["content"], page
+
+    # Locked pages (file and generated) show the game's "unlock X first" page, which links to the tech tree.
+    for page in ("docs/scripting/for.md", "functions/move", "objects/tree"):
+        is_error, doc = mcp.call("read_doc", page=page)
+        assert not is_error and "(tech_tree)" in doc["content"], (page, doc)
+
+    for page in ("functions/harvest", "items/hay", "objects/grass", "grounds/grassland", "unlocks/grass"):
+        is_error, doc = mcp.call("read_doc", page=page)
+        assert not is_error and doc["content"].strip(), (page, doc)
+
+    for bad in ("docs/nope.md", "functions/nope", "items/nope", "docs/../../x.md"):
+        is_error, text = mcp.call("read_doc", page=bad)
+        assert is_error and bad in text, (bad, text)
+    print(f"    {len(pages)} pages listed")
+
+
+CHECKS = [check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_docs]
 
 
 def main():
