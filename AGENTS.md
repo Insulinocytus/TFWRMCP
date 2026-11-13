@@ -1,0 +1,15 @@
+# AGENTS.md
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (Insulinocytus/TFWRMCP) via `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context. See `docs/agents/domain.md`.
