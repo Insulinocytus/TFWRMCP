@@ -10,7 +10,38 @@ namespace TFWRMCP;
 /// <summary>The Tool catalogue.</summary>
 public static partial class Tools
 {
-    static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
+    internal static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Adds JSON Schema keywords to one property of a <see cref="Schema"/>.</summary>
+    static JObject WithSchema(JObject schema, string property, JObject extra)
+    {
+        ((JObject)schema["properties"]![property]!).Merge(extra);
+        return schema;
+    }
+
+    static readonly (string Name, StateParts Part)[] StateFields =
+    {
+        ("save", StateParts.Save), ("inventory", StateParts.Inventory), ("unlocks", StateParts.Unlocks),
+        ("world_size", StateParts.WorldSize), ("drones", StateParts.Drones), ("tiles", StateParts.Tiles),
+        ("run", StateParts.Run),
+    };
+
+    static StateParts RequestedStateParts(JObject args)
+    {
+        var token = args["fields"];
+        if (token == null || token.Type == JTokenType.Null) return StateParts.All;
+        var options = string.Join(", ", StateFields.Select(f => f.Name));
+        if (token is not JArray { Count: > 0 } names)
+            throw new ToolException($"'fields' must be a non-empty array of field names: {options}.");
+        var parts = (StateParts)0;
+        foreach (var name in names)
+        {
+            var field = name is JValue { Value: string text } ? StateFields.FirstOrDefault(f => f.Name == text) : default;
+            if (field.Name == null) throw new ToolException($"Unknown field '{name}'. Fields: {options}.");
+            parts |= field.Part;
+        }
+        return parts;
+    }
 
     static JObject Schema(params (string Name, string Type, string Description, bool Required)[] properties)
     {
@@ -63,13 +94,25 @@ public static partial class Tools
             "the latest Run (run: status idle, running, finished, error, stopped_by_tool, stopped_by_user or " +
             "parse_error, plus script, error and Leaderboard result; use wait_run for its output), and the grid as tiles[y][x] (x grows east, y grows " +
             "north). Each tile has the ground type, plus the entity type unless the tile is empty and the " +
-            "depth unless it is 0.",
-            Schema(),
-            async (_, _) =>
+            "depth unless it is 0. The full snapshot is large; pass fields to get only what you need.",
+            WithSchema(
+                Schema(("fields", "array", "Top-level fields to return (default: all): save, inventory, unlocks, " +
+                    "world_size, drones, tiles, run. Fields not listed are not read from the game.", false)),
+                "fields",
+                new JObject { ["items"] = new JObject { ["type"] = "string", ["enum"] = new JArray(StateFields.Select(f => f.Name)) } }),
+            async (args, _) =>
             {
-                var state = await game.GetState();
-                state.Run = runs.Snapshot(withOutput: false);
-                return state;
+                var parts = RequestedStateParts(args);
+                var state = await game.GetState(parts);
+                var result = new Dictionary<string, object?>();
+                if (parts.HasFlag(StateParts.Save)) result["save"] = state.Save;
+                if (parts.HasFlag(StateParts.Inventory)) result["inventory"] = state.Inventory;
+                if (parts.HasFlag(StateParts.Unlocks)) result["unlocks"] = state.Unlocks;
+                if (parts.HasFlag(StateParts.WorldSize)) result["world_size"] = state.WorldSize;
+                if (parts.HasFlag(StateParts.Drones)) result["drones"] = state.Drones;
+                if (parts.HasFlag(StateParts.Tiles)) result["tiles"] = state.Tiles;
+                if (parts.HasFlag(StateParts.Run)) result["run"] = runs.Snapshot(withOutput: false);
+                return result;
             },
             Capabilities.State),
         new Tool(

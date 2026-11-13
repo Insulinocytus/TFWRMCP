@@ -93,8 +93,11 @@ public sealed partial class FakeGame : IGame
     /// <summary>While set, GetState waits for it: a Tool stuck inside a game call.</summary>
     public TaskCompletionSource<bool>? GetStateBlocker { get; set; }
 
-    public async Task<GameState> GetState()
+    public StateParts LastParts { get; private set; }
+
+    public async Task<GameState> GetState(StateParts parts)
     {
+        LastParts = parts;
         if (Scene != GameScene.Playing) throw new InvalidOperationException("a Tool ran while the game was not playable");
         var now = Interlocked.Increment(ref inFlight);
         Calls++;
@@ -139,7 +142,6 @@ public sealed partial class FakeGame : IGame
                 new TileState { Entity = null, Ground = "dirt", Depth = 2 },
             },
         },
-        Run = new RunSnapshot { Status = RunStatus.Running },
     };
 }
 

@@ -289,6 +289,43 @@ def check_leaderboard_run(mcp):
     assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
 
 
+def check_get_state_fields(mcp):
+    state = ok(mcp, "get_state", fields=["inventory", "run"])
+    assert sorted(state) == ["inventory", "run"], list(state)
+    assert ok(mcp, "get_state", fields=["tiles"]).keys() == {"tiles"}
+    assert sorted(ok(mcp, "get_state", fields=["save", "world_size", "drones", "unlocks"])) == [
+        "drones", "save", "unlocks", "world_size"]
+    fails(mcp, "get_state", "world_size", fields=["inventory", "nope"])
+
+
+def check_until_inventory(mcp):
+    props = {t["name"]: t for t in mcp.rpc("tools/list")["tools"]}["run_script"]["inputSchema"]["properties"]
+    assert {"until_inventory", "stop_when_met"} <= props.keys() and "0" in props["timeout_seconds"]["description"], props
+
+    fails(mcp, "run_script", "Unknown item", name="smoke_run", until_inventory={"no_such_item": 1})
+    assert ok(mcp, "get_state")["run"]["status"] != "running"
+
+    # timeout_seconds 0 returns as soon as the Run started; an unreachable target is not met.
+    ok(mcp, "write_script", name="smoke_until", code="while True:\n    do_a_flip()\n")
+    run = ok(mcp, "run_script", name="smoke_until", timeout_seconds=0, until_inventory={"hay": 1e12})
+    assert run["status"] == "running" and run["met"] is False and "hay" in run["inventory"], run
+    # An already-held target is met at once; stop_when_met then stops the Run.
+    run = ok(mcp, "wait_run", timeout_seconds=30, until_inventory={"hay": 0}, stop_when_met=True)
+    assert run["status"] == "stopped_by_tool" and run["met"] is True, run
+    # The Run is over: a target that is not met is reported at once, not at the timeout.
+    started = time.time()
+    run = ok(mcp, "wait_run", timeout_seconds=30, until_inventory={"hay": 1e12})
+    assert run["status"] == "stopped_by_tool" and run["met"] is False and time.time() - started < 10, run
+
+    # Run until hay grows, then stop, in one call.
+    hay = ok(mcp, "get_state", fields=["inventory"])["inventory"]["hay"]
+    ok(mcp, "write_script", name="smoke_hay", code="while True:\n    if can_harvest():\n        harvest()\n")
+    run = ok(mcp, "run_script", name="smoke_hay", timeout_seconds=120, stop_when_met=True, until_inventory={"hay": hay + 5})
+    assert run["status"] == "stopped_by_tool" and run["met"] is True and run["inventory"]["hay"] >= hay + 5, run
+    assert ok(mcp, "get_state")["run"]["status"] == "stopped_by_tool"
+    print(f"    hay {hay} -> {run['inventory']['hay']}")
+
+
 def check_save_switch_ends_run(mcp):
     run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=1)
     ok(mcp, "load_save", name=mcp.other_save)
@@ -342,7 +379,8 @@ def check_docs(mcp):
 CHECKS = [
     check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_docs,
     check_scripts, check_grant_unlocks, check_run_finishes, check_run_timeout_wait_stop, check_run_parse_error,
-    check_run_runtime_error, check_run_output_buffer, check_leaderboard_run, check_save_switch_ends_run,
+    check_run_runtime_error, check_run_output_buffer, check_leaderboard_run, check_get_state_fields, check_until_inventory,
+    check_save_switch_ends_run,
 ]
 
 

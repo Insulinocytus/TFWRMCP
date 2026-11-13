@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 
@@ -39,6 +40,20 @@ public sealed class TileState
     public int Depth { get; set; }
 }
 
+/// <summary>The top-level parts of get_state; <see cref="Run"/> comes from the Run tracker, not from the game.</summary>
+[Flags]
+public enum StateParts
+{
+    Save = 1,
+    Inventory = 2,
+    Unlocks = 4,
+    WorldSize = 8,
+    Drones = 16,
+    Tiles = 32,
+    Run = 64,
+    All = 127,
+}
+
 public sealed class GameState
 {
     public string Save { get; set; } = "";
@@ -49,7 +64,4 @@ public sealed class GameState
 
     /// <summary>Indexed [y][x]; x grows east and y grows north, like the game's coordinates.</summary>
     public List<List<TileState>> Tiles { get; } = new();
-
-    /// <summary>Filled in by the get_state Tool from the Run tracker, not by the game layer.</summary>
-    public RunSnapshot Run { get; set; } = new();
 }

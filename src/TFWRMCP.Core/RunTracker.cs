@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -77,6 +79,30 @@ public sealed class RunSnapshot
     /// <summary>Older output entries that no longer fit the buffer.</summary>
     [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
     public int OutputDropped { get; set; }
+
+    /// <summary>Only with an <see cref="InventoryGoal"/>: the whole inventory at the end of the wait.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, double>? Inventory { get; set; }
+
+    /// <summary>Only with an <see cref="InventoryGoal"/>: whether the inventory met it.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public bool? Met { get; set; }
+}
+
+/// <summary>Wait until every item is at least its amount; with <see cref="StopWhenMet"/> the Run is stopped as soon as that holds.</summary>
+public sealed class InventoryGoal
+{
+    public Dictionary<string, double> AtLeast { get; }
+    public bool StopWhenMet { get; }
+
+    public InventoryGoal(Dictionary<string, double> atLeast, bool stopWhenMet)
+    {
+        AtLeast = atLeast;
+        StopWhenMet = stopWhenMet;
+    }
+
+    public bool IsMet(Dictionary<string, double> inventory) =>
+        AtLeast.All(item => inventory.TryGetValue(item.Key, out var have) && have >= item.Value);
 }
 
 /// <summary>
@@ -203,19 +229,61 @@ public sealed class RunTracker
         OutputDropped = withOutput ? r.Dropped : 0,
     };
 
-    /// <summary>Waits for the Run to end for at most <paramref name="timeout"/>, then reports it with its output; throws if <paramref name="cancel"/> is cancelled.</summary>
-    public async Task<RunSnapshot> Wait(TimeSpan timeout, CancellationToken cancel)
+    static readonly TimeSpan InventoryPollInterval = TimeSpan.FromMilliseconds(100);
+
+    bool IsRunning(Record run)
+    {
+        lock (gate) return run.Status == RunStatus.Running;
+    }
+
+    async Task WaitOver(Record run, TimeSpan timeout, CancellationToken cancel)
+    {
+        using var stopWaiting = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        await Task.WhenAny(run.Over.Task, Task.Delay(timeout, stopWaiting.Token));
+        stopWaiting.Cancel();
+        cancel.ThrowIfCancellationRequested();
+    }
+
+    async Task<Dictionary<string, double>> ReadInventory() => (await game.GetState(StateParts.Inventory)).Inventory;
+
+    /// <summary>
+    /// Waits for the Run to end for at most <paramref name="timeout"/>, then reports it with its output; throws if
+    /// <paramref name="cancel"/> is cancelled. With a <paramref name="goal"/> it also ends once the goal is met (and
+    /// then stops the Run if asked to), and the result carries the inventory and whether the goal was met.
+    /// </summary>
+    public async Task<RunSnapshot> Wait(TimeSpan timeout, CancellationToken cancel, InventoryGoal? goal = null)
     {
         Record run;
         lock (gate) run = current;
-        if (run.Status == RunStatus.Running)
+        if (goal == null)
         {
-            using var stopWaiting = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-            await Task.WhenAny(run.Over.Task, Task.Delay(timeout, stopWaiting.Token));
-            stopWaiting.Cancel();
-            cancel.ThrowIfCancellationRequested();
+            if (IsRunning(run)) await WaitOver(run, timeout, cancel);
+            lock (gate) return Describe(run, withOutput: true);
         }
-        lock (gate) return Describe(run, withOutput: true);
+
+        var clock = Stopwatch.StartNew();
+        Dictionary<string, double> inventory;
+        bool met;
+        while (true)
+        {
+            cancel.ThrowIfCancellationRequested();
+            inventory = await ReadInventory();
+            met = goal.IsMet(inventory);
+            var left = timeout - clock.Elapsed;
+            if (met || !IsRunning(run) || left <= TimeSpan.Zero) break;
+            await WaitOver(run, left < InventoryPollInterval ? left : InventoryPollInterval, cancel);
+        }
+
+        if (met && goal.StopWhenMet && IsRunning(run))
+        {
+            await StopByTool(Tools.StopTimeout, cancel);
+            inventory = await ReadInventory();
+        }
+        RunSnapshot snapshot;
+        lock (gate) snapshot = Describe(run, withOutput: true);
+        snapshot.Inventory = inventory;
+        snapshot.Met = met;
+        return snapshot;
     }
 
     /// <summary>Stops the Run in progress on the Agent's behalf and waits for it to end; with no Run in progress it only reports.</summary>
