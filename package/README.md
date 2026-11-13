@@ -28,7 +28,14 @@ The server only listens on localhost. Its settings are in the game's options men
 ## Tools
 
 `get_state` returns the Save name, inventory, Unlock levels and next costs, world size, drone positions, every
-tile's entity and ground, and the Run status.
+tile as `tiles[y][x]` (`tiles[0][0]` is (0, 0); y grows north, x grows east) with its ground, entity, whether it can
+be harvested, water level and growth progress, and the Run status. It is large; pass `fields` (for example
+`["inventory","run"]`) to get only those top-level fields.
+
+`run_script` and `wait_run` end when the Run does, or after `timeout_seconds` (`0` returns right after the Run has
+started). Pass `until_inventory` (for example `{"carrot": 600}`) to also end as soon as the inventory holds at least
+that much of every item; the result then has `inventory` and `met`. With `stop_when_met` the Run is stopped at that
+moment, so "run until carrot ≥ 600, then stop" is a single call.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.
