@@ -93,7 +93,8 @@ public static partial class Tools
             "with its level, the cost of the next level (null at max level) and its prerequisites (parent: Unlock to own first; " +
             "also_requires: {name, level}; each omitted when there is none), world size, drone positions, " +
             "the latest Run (run: status idle, running, finished, error, stopped_by_tool, stopped_by_user or " +
-            "parse_error, plus script, error and Leaderboard result; use wait_run for its output), and the grid as tiles[y][x]: " +
+            "parse_error, plus script, error, Leaderboard result and the run summary: " + RunSummaryDescription +
+            " Use wait_run for its output), and the grid as tiles[y][x]: " +
             "the outer array index is y (south to north), the inner index is x (west to east), so tiles[0][0] is (0, 0) " +
             "and x grows east, y grows north. Each tile has the ground type, plus: the entity type unless the tile is " +
             "empty; depth unless it is 0; harvestable: true when the entity can be harvested (as can_harvest() says); " +
@@ -115,7 +116,7 @@ public static partial class Tools
                 if (parts.HasFlag(StateParts.WorldSize)) result["world_size"] = state.WorldSize;
                 if (parts.HasFlag(StateParts.Drones)) result["drones"] = state.Drones;
                 if (parts.HasFlag(StateParts.Tiles)) result["tiles"] = state.Tiles;
-                if (parts.HasFlag(StateParts.Run)) result["run"] = runs.Snapshot(withOutput: false);
+                if (parts.HasFlag(StateParts.Run)) result["run"] = await runs.Snapshot(withOutput: false);
                 return result;
             },
             Capabilities.State),

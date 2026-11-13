@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -360,7 +361,7 @@ public class RunToolTests
         var game = GameWith();
         using var s = new TestServer(game);
 
-        game.Emit(new RunStarted("main"));
+        game.Emit(new RunStarted("main", new Dictionary<string, double>()));
         var state = await Ok(s, "get_state");
         var (isError, text) = await s.Call("run_script", Run("main"));
 

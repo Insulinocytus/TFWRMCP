@@ -1,13 +1,34 @@
+using System.Collections.Generic;
+
 namespace TFWRMCP;
 
-/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/Errored/LeaderboardFinished in any order, Ended.</summary>
+/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionFailed/Errored/LeaderboardFinished in any order, Ended.</summary>
 public abstract class RunEvent { }
 
 /// <summary>A Run began, whoever started it. Output of earlier Runs is discarded.</summary>
 public sealed class RunStarted : RunEvent
 {
     public string Script { get; }
-    public RunStarted(string script) => Script = script;
+
+    /// <summary>The real farm's whole inventory when the Run began.</summary>
+    public Dictionary<string, double> Inventory { get; }
+
+    public RunStarted(string script, Dictionary<string, double> inventory)
+    {
+        Script = script;
+        Inventory = inventory;
+    }
+}
+
+/// <summary>
+/// The Script called an action that counts as failed: it returned False, or it was harvest() on an entity that is
+/// not harvestable (the game then returns True, clears the crop and yields nothing). Actions on the temporary farm
+/// of simulate() and Leaderboard Runs are never reported.
+/// </summary>
+public sealed class ActionFailed : RunEvent
+{
+    public string Function { get; }
+    public ActionFailed(string function) => Function = function;
 }
 
 /// <summary>One entry of the game's output, already cut to the game's per-entry limit.</summary>
@@ -64,9 +85,21 @@ public enum RunEnd
     Stopped,
 }
 
-/// <summary>The Run is over (for a Leaderboard Run: its result page is closed and the farm is usable again).</summary>
+/// <summary>
+/// The Run is over (for a Leaderboard Run: its result page is closed and the farm is usable again).
+/// <paramref name="inventory"/> is the real farm's whole inventory at that moment, null when it can no longer be
+/// read; <paramref name="ticks"/> is the number of game steps the Run executed (as get_tick_count counts them).
+/// </summary>
 public sealed class RunEnded : RunEvent
 {
     public RunEnd How { get; }
-    public RunEnded(RunEnd how) => How = how;
+    public Dictionary<string, double>? Inventory { get; }
+    public long Ticks { get; }
+
+    public RunEnded(RunEnd how, Dictionary<string, double>? inventory = null, long ticks = 0)
+    {
+        How = how;
+        Inventory = inventory;
+        Ticks = ticks;
+    }
 }

@@ -87,6 +87,22 @@ public sealed class RunSnapshot
     /// <summary>Only with an <see cref="InventoryGoal"/>: whether the inventory met it.</summary>
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public bool? Met { get; set; }
+
+    /// <summary>Item name to net change since the Run began (the whole farm: Script, game and human alike), non-zero items only; absent when the Run's end inventory is unknown.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, double>? InventoryDelta { get; set; }
+
+    /// <summary>Function name to the number of failed calls, non-zero functions only.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, int>? FailedCalls { get; set; }
+
+    /// <summary>Game steps the Run has executed; fixed once it has ended.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public long? Ticks { get; set; }
+
+    /// <summary>Real time since the Run began; fixed once it has ended.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public double? Seconds { get; set; }
 }
 
 /// <summary>Wait until every item is at least its amount; with <see cref="StopWhenMet"/> the Run is stopped as soon as that holds.</summary>
@@ -123,6 +139,13 @@ public sealed class RunTracker
         public LeaderboardOutcome? Leaderboard;
         public bool StopRequestedByTool;
         public readonly TaskCompletionSource<bool> Over = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Null for Runs that never started: they have no summary.
+        public Dictionary<string, double>? StartInventory;
+        public Stopwatch? Clock;
+        public readonly Dictionary<string, int> Failed = new();
+        public Dictionary<string, double>? EndInventory;
+        public long EndTicks;
     }
 
     readonly object gate = new();
@@ -153,13 +176,19 @@ public sealed class RunTracker
             if (e is RunStarted started)
             {
                 current.Over.TrySetResult(true);
-                current = new Record { Status = RunStatus.Running, Script = started.Script };
+                current = new Record
+                {
+                    Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
+                };
                 return;
             }
 
             if (current.Status != RunStatus.Running) return;
             switch (e)
             {
+                case ActionFailed failed:
+                    current.Failed[failed.Function] = current.Failed.GetValueOrDefault(failed.Function) + 1;
+                    break;
                 case RunOutput output:
                     current.Output.Enqueue(output.Text);
                     if (current.Output.Count > MaxOutput)
@@ -183,6 +212,9 @@ public sealed class RunTracker
                         current.Error != null ? RunStatus.Error :
                         ended.How == RunEnd.Terminated ? RunStatus.Finished :
                         current.StopRequestedByTool ? RunStatus.StoppedByTool : RunStatus.StoppedByUser;
+                    current.Clock!.Stop();
+                    current.EndInventory = ended.Inventory;
+                    current.EndTicks = ended.Ticks;
                     current.Over.TrySetResult(true);
                     break;
             }
@@ -214,20 +246,45 @@ public sealed class RunTracker
         }
     }
 
-    public RunSnapshot Snapshot(bool withOutput)
+    public Task<RunSnapshot> Snapshot(bool withOutput)
     {
-        lock (gate) return Describe(current, withOutput);
+        Record run;
+        lock (gate) run = current;
+        return Report(run, withOutput);
     }
 
-    static RunSnapshot Describe(Record r, bool withOutput) => new()
+    /// <summary>Describes the Run; while it is running its inventory delta needs the current inventory, which <paramref name="live"/> may already hold.</summary>
+    async Task<RunSnapshot> Report(Record run, bool withOutput, Dictionary<string, double>? live = null)
     {
-        Status = r.Status,
-        Script = r.Script,
-        Error = r.Error,
-        Leaderboard = r.Leaderboard,
-        Output = withOutput ? new List<string>(r.Output) : null,
-        OutputDropped = withOutput ? r.Dropped : 0,
-    };
+        if (live == null && IsRunning(run)) live = await ReadInventory();
+        lock (gate) return Describe(run, withOutput, live);
+    }
+
+    RunSnapshot Describe(Record r, bool withOutput, Dictionary<string, double>? live)
+    {
+        var snapshot = new RunSnapshot
+        {
+            Status = r.Status,
+            Script = r.Script,
+            Error = r.Error,
+            Leaderboard = r.Leaderboard,
+            Output = withOutput ? new List<string>(r.Output) : null,
+            OutputDropped = withOutput ? r.Dropped : 0,
+        };
+        if (r.Clock == null) return snapshot;
+
+        var running = r.Status == RunStatus.Running;
+        var end = running ? live : r.EndInventory;
+        if (end != null)
+            snapshot.InventoryDelta = end.Keys.Union(r.StartInventory!.Keys)
+                .Select(item => (Item: item, Change: end.GetValueOrDefault(item) - r.StartInventory.GetValueOrDefault(item)))
+                .Where(c => c.Change != 0)
+                .ToDictionary(c => c.Item, c => c.Change);
+        snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
+        snapshot.Ticks = running ? game.RunTicks : r.EndTicks;
+        snapshot.Seconds = Math.Round(r.Clock.Elapsed.TotalSeconds, 3);
+        return snapshot;
+    }
 
     static readonly TimeSpan InventoryPollInterval = TimeSpan.FromMilliseconds(100);
 
@@ -258,7 +315,7 @@ public sealed class RunTracker
         if (goal == null)
         {
             if (IsRunning(run)) await WaitOver(run, timeout, cancel);
-            lock (gate) return Describe(run, withOutput: true);
+            return await Report(run, withOutput: true);
         }
 
         var clock = Stopwatch.StartNew();
@@ -279,8 +336,7 @@ public sealed class RunTracker
             await StopByTool(Tools.StopTimeout, cancel);
             inventory = await ReadInventory();
         }
-        RunSnapshot snapshot;
-        lock (gate) snapshot = Describe(run, withOutput: true);
+        var snapshot = await Report(run, withOutput: true, inventory);
         snapshot.Inventory = inventory;
         snapshot.Met = met;
         return snapshot;
@@ -289,11 +345,15 @@ public sealed class RunTracker
     /// <summary>Stops the Run in progress on the Agent's behalf and waits for it to end; with no Run in progress it only reports.</summary>
     public async Task<RunSnapshot> StopByTool(TimeSpan timeout, CancellationToken cancel)
     {
+        Record run;
+        bool running;
         lock (gate)
         {
-            if (current.Status != RunStatus.Running) return Describe(current, withOutput: true);
-            current.StopRequestedByTool = true;
+            run = current;
+            running = run.Status == RunStatus.Running;
+            if (running) run.StopRequestedByTool = true;
         }
+        if (!running) return await Report(run, withOutput: true);
         await game.StopRun();
         return await Wait(timeout, cancel);
     }

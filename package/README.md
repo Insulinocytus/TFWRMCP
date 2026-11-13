@@ -37,6 +37,13 @@ started). Pass `until_inventory` (for example `{"carrot": 600}`) to also end as 
 that much of every item; the result then has `inventory` and `met`. With `stop_when_met` the Run is stopped at that
 moment, so "run until carrot ≥ 600, then stop" is a single call.
 
+Every Run (from `run_script`, `wait_run`, `stop_run` and `get_state`'s `run`) carries a summary so a script that spins
+without progress shows: `inventory_delta` (net change per item since the Run began, non-zero items only, covering
+everything: script actions, the game's own production and consumption, Unlocks bought), `failed_calls` (per function,
+how often `plant`, `harvest`, `move`, `swap`, `use_item`, `place`, `dig`, `push`, `unlock` or `hover` returned
+`False`; `harvest()` on an unripe entity counts too, `till()` is not counted), `ticks` (game steps) and `seconds`.
+Actions on the temporary farm of `simulate()` and leaderboard runs do not count.
+
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.
 

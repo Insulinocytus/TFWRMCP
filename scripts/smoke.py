@@ -510,12 +510,39 @@ def check_unlock_batch_and_costs(mcp):
     print(f"    batch bought {name} to level {after[name]}")
 
 
+def check_run_summary(mcp):
+    run = run_wait(mcp, "smoke_run", "for i in range(3):\n    print(i)\n")
+    assert run["ticks"] > 0 and run["seconds"] >= 0 and run["failed_calls"] == {}, run
+    assert all(v != 0 for v in run["inventory_delta"].values()), run
+    assert ok(mcp, "get_state", fields=["run"])["run"]["ticks"] == run["ticks"]
+
+    # Planting on an occupied tile returns False: every plant after the first fails.
+    run = run_wait(mcp, "smoke_fail_plant", "for i in range(20):\n    plant(Entities.Bush)\n")
+    assert run["status"] == "finished" and run["failed_calls"].get("plant", 0) > 0, run
+    print(f"    failed_calls {run['failed_calls']}, inventory_delta {run['inventory_delta']}")
+
+    # harvest() of an unripe plant returns True in the game, yet counts as a failed harvest.
+    run = run_wait(mcp, "smoke_fail_harvest", "harvest()\nfor i in range(5):\n    plant(Entities.Bush)\n    harvest()\n")
+    assert run["status"] == "finished" and run["failed_calls"].get("harvest", 0) > 0, run
+
+    # Actions on simulate()'s temporary farm are not counted.
+    ok(mcp, "write_script", name="smoke_sim_target", code="for i in range(20):\n    plant(Entities.Bush)\n    harvest()\n")
+    run = run_wait(mcp, "smoke_sim_summary", "simulate('smoke_sim_target', {}, {}, {}, -1, 1000)\n")
+    assert run["status"] == "finished" and run["failed_calls"] == {}, run
+
+    # Ticks and seconds stop growing once the Run has ended.
+    again = ok(mcp, "wait_run")
+    time.sleep(1)
+    assert ok(mcp, "wait_run")["seconds"] == again["seconds"] and ok(mcp, "get_state", fields=["run"])["run"]["ticks"] == again["ticks"]
+
+
 # Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it the original Save's Unlocks.
 CHECKS = [
     check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_unlock_plan, check_docs,
     check_scripts, check_list_builtins, check_grant_unlocks, check_unlock_batch_and_costs, check_run_finishes,
     check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
-    check_leaderboard_run, check_get_state_fields, check_until_inventory, check_tile_fields, check_save_switch_ends_run,
+    check_leaderboard_run, check_get_state_fields, check_until_inventory, check_tile_fields, check_run_summary,
+    check_save_switch_ends_run,
 ]
 
 
