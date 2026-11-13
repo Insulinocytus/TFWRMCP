@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using Core.Platform;
@@ -13,31 +12,38 @@ public sealed partial class GameAdapter
 {
     void ResolveUnlockDocs(Action<string> warn)
     {
-        const BindingFlags Public = BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance;
-        foreach (var (type, name) in new[]
-                 {
-                     (typeof(MainSim), "UnlockOrUpgrade"), (typeof(MainSim), "UnlockHat"), (typeof(MainSim), "IsSimulating"),
-                     (typeof(MainSim), "GetUnlockCost"), (typeof(MainSim), "NumUnlocked"), (typeof(ResourceManager), "GetUnlock"),
-                     (typeof(ResourceManager), "GetHat"),
-                 })
-            Resolve(Capabilities.Unlock, type.GetMethod(name, Public), $"{type.Name}.{name}", warn);
-
-        foreach (var (type, name) in new[]
-                 {
-                     (typeof(Localizer), "Localize"), (typeof(Localizer), "LoadDoc"), (typeof(ResourceManager), "GetUnlockOf"),
-                     (typeof(TooltipUtils), "UnlockTooltip"), (typeof(TooltipUtils), "ItemTooltip"),
-                     (typeof(TooltipUtils), "FarmObjectTooltip"), (typeof(TooltipUtils), "GroundTooltip"),
-                     (typeof(TooltipUtils), "GetKeywordDocsPage"), (typeof(CodeUtilities), "ToUpperSnake"),
-                 })
-            Resolve(Capabilities.Docs, type.GetMethod(name, Public), $"{type.Name}.{name}", warn);
+        ResolveMethods(Capabilities.Unlock, warn,
+            ("MainSim", "UnlockOrUpgrade"), ("MainSim", "UnlockHat"), ("MainSim", "IsSimulating"), ("MainSim", "GetUnlockCost"),
+            ("MainSim", "NumUnlocked"), ("ResourceManager", "GetUnlock"), ("ResourceManager", "GetHat"));
+        ResolveMethods(Capabilities.Docs, warn,
+            ("Localizer", "Localize"), ("Localizer", "LoadDoc"), ("ResourceManager", "GetUnlockOf"), ("TooltipUtils", "UnlockTooltip"),
+            ("TooltipUtils", "ItemTooltip"), ("TooltipUtils", "FarmObjectTooltip"), ("TooltipUtils", "GroundTooltip"),
+            ("TooltipUtils", "GetKeywordDocsPage"), ("CodeUtilities", "ToUpperSnake"));
     }
 
-    public Task<UnlockFacts?> GetUnlockFacts(string name) => MainThread.Run(() => ReadUnlockFacts(name));
+    // The research menu's UnlockBox.ButtonClicked (minus the reset-to-max cheat branch), preceded by the precheck in the same tick.
+    public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot) => MainThread.Run(() =>
+    {
+        var facts = ReadUnlockFacts(name);
+        if (facts == null) return new UnlockAttempt();
+        var refusal = whyNot(facts);
+        if (refusal != null) return new UnlockAttempt { Facts = facts, Refusal = refusal };
+
+        var main = MainSim.Inst;
+        var unlock = ResourceManager.GetUnlock(facts.Name);
+        var bought = main.UnlockOrUpgrade(unlock);
+        if (bought)
+        {
+            if (!string.IsNullOrEmpty(unlock.unlockedHat)) main.UnlockHat(ResourceManager.GetHat(unlock.unlockedHat));
+            FMODSoundManager.PlaySound(SoundEffectType.Unlock, Vector3.zero);
+        }
+        return new UnlockAttempt { Facts = facts, Bought = bought, Level = main.NumUnlocked(facts.Name) };
+    });
 
     static UnlockFacts? ReadUnlockFacts(string name)
     {
         var main = MainSim.Inst;
-        if (main == null) throw new ToolException("The game scene is loading; try again shortly.");
+        if (main == null) throw new ToolException(SceneLoading);
 
         // Same list the research menu shows (and get_state reports).
         var unlock = ResourceManager.GetUnlock(name.Trim().ToLowerInvariant());
@@ -61,24 +67,12 @@ public sealed partial class GameAdapter
         };
     }
 
-    // The research menu's UnlockBox.ButtonClicked, minus the reset-to-max cheat branch.
-    public Task<bool> BuyUnlock(string name) => MainThread.Run(() =>
-    {
-        var main = MainSim.Inst;
-        var unlock = ResourceManager.GetUnlock(name);
-        if (main == null || unlock == null || !main.UnlockOrUpgrade(unlock)) return false;
-
-        if (!string.IsNullOrEmpty(unlock.unlockedHat)) main.UnlockHat(ResourceManager.GetHat(unlock.unlockedHat));
-        FMODSoundManager.PlaySound(SoundEffectType.Unlock, Vector3.zero);
-        return true;
-    });
-
     public Task<string> ReadDoc(string page) => MainThread.Run(() => RenderDoc(page));
 
     static string RenderDoc(string doc)
     {
         var main = MainSim.Inst;
-        if (main == null) throw new ToolException("The game scene is loading; try again shortly.");
+        if (main == null) throw new ToolException(SceneLoading);
 
         var text = DocSource(doc) ?? throw new ToolException(
             $"No doc page '{doc}'. Page ids are listed by list_docs (for example docs/home.md, functions/harvest, unlocks/plant).");

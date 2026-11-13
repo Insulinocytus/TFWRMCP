@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using TFWRMCP;
@@ -10,17 +11,17 @@ public sealed partial class FakeGame
     public bool UnlockRefused { get; set; }
     public Dictionary<string, string> Docs { get; } = new();
 
-    public Task<UnlockFacts?> GetUnlockFacts(string name) =>
-        Task.FromResult(UnlockFacts.TryGetValue(name, out var facts) ? facts : null);
-
-    public Task<bool> BuyUnlock(string name)
+    public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot)
     {
+        if (!UnlockFacts.TryGetValue(name, out var facts)) return Task.FromResult(new UnlockAttempt());
+        var refusal = whyNot(facts);
+        if (refusal != null) return Task.FromResult(new UnlockAttempt { Facts = facts, Refusal = refusal });
+
         Events.Add("unlock:" + name);
-        if (UnlockRefused) return Task.FromResult(false);
-        var facts = UnlockFacts[name];
+        if (UnlockRefused) return Task.FromResult(new UnlockAttempt { Facts = facts, Level = facts.Level });
         facts.Level++;
         foreach (var (item, amount) in facts.Cost) facts.Inventory[item] -= amount;
-        return Task.FromResult(true);
+        return Task.FromResult(new UnlockAttempt { Facts = facts, Bought = true, Level = facts.Level });
     }
 
     public Task<string> ReadDoc(string page) =>

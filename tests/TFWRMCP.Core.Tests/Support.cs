@@ -33,11 +33,16 @@ public sealed partial class FakeGame : IGame
 
     /// <summary>Everything the Game was asked to do that changes the world, in order.</summary>
     public List<string> Events { get; } = new();
-    int loadingPolls;
+
+    /// <summary>Calls to GetScene that still report Loading before the title menu shows up.</summary>
+    public int LoadingPolls { get; set; }
+
+    public int ScenePolls { get; private set; }
 
     public Task<GameScene> GetScene()
     {
-        if (Scene == GameScene.Loading && loadingPolls-- <= 0) Scene = GameScene.TitleMenu;
+        ScenePolls++;
+        if (Scene == GameScene.Loading && LoadingPolls-- <= 0) Scene = GameScene.TitleMenu;
         return Task.FromResult(Scene);
     }
 
@@ -66,14 +71,15 @@ public sealed partial class FakeGame : IGame
         return Task.CompletedTask;
     }
 
-    public Task LoadSave(string name)
+    public Task LoadSave(string name, CancellationToken cancel)
     {
+        cancel.ThrowIfCancellationRequested();
         if (SaveFails) throw new ToolException("Saving the current Save failed.");
         Events.Add("save:" + CurrentSave);
         Events.Add("load:" + name);
         CurrentSave = name;
         Scene = GameScene.Loading;
-        loadingPolls = ReloadPolls;
+        LoadingPolls = ReloadPolls;
         return Task.CompletedTask;
     }
 
@@ -84,6 +90,9 @@ public sealed partial class FakeGame : IGame
         return Task.CompletedTask;
     }
 
+    /// <summary>While set, GetState waits for it: a Tool stuck inside a game call.</summary>
+    public TaskCompletionSource<bool>? GetStateBlocker { get; set; }
+
     public async Task<GameState> GetState()
     {
         if (Scene != GameScene.Playing) throw new InvalidOperationException("a Tool ran while the game was not playable");
@@ -92,6 +101,7 @@ public sealed partial class FakeGame : IGame
         MaxConcurrentCalls = Math.Max(MaxConcurrentCalls, now);
         try
         {
+            if (GetStateBlocker != null) await GetStateBlocker.Task;
             if (GetStateDelay > TimeSpan.Zero) await Task.Delay(GetStateDelay);
             return State;
         }
@@ -143,12 +153,27 @@ public sealed class TestServer : IDisposable
 
     public TestServer(IGame game, params Tool[] extraTools)
     {
-        var port = FreePort();
-        Url = new Uri($"http://127.0.0.1:{port}/");
-        var tools = new List<Tool>(Tools.Create(game));
+        var tools = new List<Tool>(Tools.Create(game, Log.Add));
         tools.AddRange(extraTools);
-        Server = new McpServer(game, tools, port, Log.Add);
-        Server.Start();
+
+        // A port freed by FreePort can be taken by a parallel test before we bind it, so retry on another one.
+        for (var attempt = 1; ; attempt++)
+        {
+            var port = FreePort();
+            var server = new McpServer(game, tools, port, Log.Add);
+            try
+            {
+                server.Start();
+            }
+            catch (HttpListenerException) when (attempt < 10)
+            {
+                server.Dispose();
+                continue;
+            }
+            Server = server;
+            Url = new Uri($"http://127.0.0.1:{port}/");
+            return;
+        }
     }
 
     public static int FreePort()

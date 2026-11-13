@@ -23,8 +23,24 @@ public sealed class UnlockFacts
     public Dictionary<string, double> Cost { get; set; } = new();
     public Dictionary<string, double> Inventory { get; set; } = new();
 
-    /// <summary>True during a Leaderboard Run (or simulate), when the game refuses all purchases.</summary>
+    /// <summary>True during a Leaderboard Run or simulate(), when the game refuses all purchases.</summary>
     public bool Simulating { get; set; }
+}
+
+/// <summary>What <see cref="IGame.TryUnlock"/> found and did, all within one game tick.</summary>
+public sealed class UnlockAttempt
+{
+    /// <summary>Null when no such Unlock is listed.</summary>
+    public UnlockFacts? Facts { get; set; }
+
+    /// <summary>Why the precheck refused the purchase; null when it passed.</summary>
+    public string? Refusal { get; set; }
+
+    /// <summary>True when the precheck passed and the game bought the Unlock; false when the game refused anyway.</summary>
+    public bool Bought { get; set; }
+
+    /// <summary>The Unlock's level after the attempt.</summary>
+    public int Level { get; set; }
 }
 
 public static class UnlockCheck
@@ -33,7 +49,7 @@ public static class UnlockCheck
     public static string? WhyNot(UnlockFacts f)
     {
         if (f.Simulating)
-            return "Unlocks cannot be bought during a Leaderboard Run.";
+            return "Unlocks cannot be bought while a Leaderboard Run or simulate() is running.";
         if (!string.IsNullOrEmpty(f.Parent) && !f.ParentUnlocked)
             return $"'{f.Name}' requires '{f.Parent}' to be unlocked first.";
         if (f.Level >= f.MaxLevel)

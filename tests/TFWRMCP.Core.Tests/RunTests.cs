@@ -102,11 +102,10 @@ public class RunToolTests
         {
             game.Emit(new RunOutput("before"));
             game.Emit(new RunErrored("boom", "f <- main\nx = 1/0", "lib", "line one\nline two", 10));
-            game.Emit(new RunEnded(RunEnd.Stopped));
         };
         using var s = new TestServer(game);
 
-        var run = await Ok(s, "run_script", Run("main"));
+        var run = await Ok(s, "run_script", Run("main", 5));
 
         Assert.Equal("error", (string)run["status"]!);
         var error = run["error"]!;
@@ -116,6 +115,7 @@ public class RunToolTests
         Assert.Equal((2, 2), ((int)error["line"]!, (int)error["column"]!));
         Assert.Equal(new[] { "before" }, Output(run));
         Assert.False(game.RunActive);
+        Assert.Equal(1, game.StopCalls);
     }
 
     [Fact]
@@ -125,11 +125,10 @@ public class RunToolTests
         game.OnStartRun = _ =>
         {
             game.Emit(new RunErrored("boom", "main", null, null, 0));
-            game.Emit(new RunEnded(RunEnd.Stopped));
         };
         using var s = new TestServer(game);
 
-        var run = await Ok(s, "run_script", Run("main"));
+        var run = await Ok(s, "run_script", Run("main", 5));
 
         Assert.Equal("error", (string)run["status"]!);
         Assert.Equal("boom", (string)run["error"]!["message"]!);

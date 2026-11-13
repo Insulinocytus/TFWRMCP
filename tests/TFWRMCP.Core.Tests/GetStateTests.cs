@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -64,7 +65,7 @@ public class GetStateTests
     {
         var game = new FakeGame();
         game.Unavailable[Capabilities.State] = "field MainSim.sim not found";
-        var echo = new Tool("echo", "Echo.", new JObject { ["type"] = "object" }, _ => Task.FromResult<object?>("pong"));
+        var echo = new Tool("echo", "Echo.", new JObject { ["type"] = "object" }, (_, _) => Task.FromResult<object?>("pong"));
         using var s = new TestServer(game, echo);
 
         var (stateError, stateText) = await s.Call("get_state");
@@ -104,17 +105,16 @@ public class GetStateTests
         public Task<bool> IsValidSaveName(string name) => throw new NotSupportedException();
         public Task<string> GenerateSaveName() => throw new NotSupportedException();
         public Task CreateSave(string name) => throw new NotSupportedException();
-        public Task LoadSave(string name) => throw new NotSupportedException();
+        public Task LoadSave(string name, CancellationToken cancel) => throw new NotSupportedException();
         public Task SaveGame() => throw new NotSupportedException();
         public Task<List<string>> ListScripts() => throw new NotSupportedException();
         public Task<string> ReadScript(string name) => throw new NotSupportedException();
         public Task<bool> WriteScript(string name, string code) => throw new NotSupportedException();
         public Task DeleteScript(string name) => throw new NotSupportedException();
-        public Task<SyntaxError?> StartRun(string name) => throw new NotSupportedException();
+        public Task<SyntaxError?> StartRun(string name, CancellationToken cancel) => throw new NotSupportedException();
         public Task StopRun() => throw new NotSupportedException();
         public event Action<RunEvent> RunEvents { add { } remove { } }
-        public Task<UnlockFacts?> GetUnlockFacts(string name) => throw new NotSupportedException();
-        public Task<bool> BuyUnlock(string name) => throw new NotSupportedException();
+        public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot) => throw new NotSupportedException();
         public Task SetInputLock(string? tool) => Task.CompletedTask;
         public event Action UserTookOver { add { } remove { } }
         public Task<string> ReadDoc(string page) => throw new NotSupportedException();

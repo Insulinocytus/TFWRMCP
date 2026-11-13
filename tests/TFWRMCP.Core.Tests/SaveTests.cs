@@ -19,6 +19,22 @@ public class TitleMenuTests
     }
 
     [Fact]
+    public async Task A_title_menu_the_Mod_cannot_close_is_reported_as_a_failed_capability_not_an_internal_error()
+    {
+        var game = new FakeGame { Scene = GameScene.TitleMenu };
+        game.Unavailable[Capabilities.TitleMenu] = "Menu.Play not found";
+        using var s = new TestServer(game);
+
+        var (isError, text) = await s.Call("get_state");
+
+        Assert.True(isError);
+        Assert.Contains("title_menu", text);
+        Assert.Contains("Menu.Play not found", text);
+        Assert.DoesNotContain("Internal error", text);
+        Assert.Empty(game.Events);
+    }
+
+    [Fact]
     public async Task A_playable_game_is_left_alone()
     {
         var game = new FakeGame();
