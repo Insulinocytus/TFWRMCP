@@ -49,6 +49,7 @@ public sealed partial class GameAdapter : IGame
 
         InstallScriptAndRunSupport(warn);
         ResolveUnlockDocs(warn);
+        ResolveBuiltins(warn);
     }
 
     // Overload-safe: the first method of that name, which is enough to tell that it exists.

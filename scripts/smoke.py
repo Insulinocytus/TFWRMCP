@@ -248,21 +248,54 @@ def check_run_output_buffer(mcp):
         len(run["output"]), run["output"][-1:], run.get("output_dropped"))
 
 
-def check_grant_unlocks(mcp):
-    # A fresh Save lacks print/range/simulate/leaderboards. Give the throwaway test Save the original Save's Unlocks
-    # (plus the Leaderboard) on disk. The original Save is only read, never loaded. A Save's file is rewritten when
-    # the game leaves it, so edit the test Save while the other throwaway Save is loaded, then load it back.
+def grant_unlocks(mcp, extra, from_original=False):
+    # Edit the test Save's Unlocks on disk (optionally adding the original Save's, which is only read, never loaded).
+    # A Save's file is rewritten when the game leaves it, so edit the test Save while the other throwaway Save is
+    # loaded, then load it back.
     assert os.path.isdir(SAVES_DIR), f"Saves directory not found: {SAVES_DIR}"
     ok(mcp, "load_save", name=mcp.other_save)
-    with open(os.path.join(SAVES_DIR, mcp.original_save, "save.json"), encoding="utf-8") as f:
-        unlocks = json.load(f)["unlocks"]
+    unlocks = set(extra)
+    if from_original:
+        with open(os.path.join(SAVES_DIR, mcp.original_save, "save.json"), encoding="utf-8") as f:
+            unlocks |= set(json.load(f)["unlocks"])
     path = os.path.join(SAVES_DIR, mcp.test_save, "save.json")
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    data["unlocks"] = sorted(set(unlocks) | set(data["unlocks"]) | {"simulation", "leaderboard"})
+    data["unlocks"] = sorted(unlocks | set(data["unlocks"]))
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
     ok(mcp, "load_save", name=mcp.test_save)
+
+
+def check_grant_unlocks(mcp):
+    # A fresh Save lacks print/range/simulate/leaderboards: give the test Save the original Save's Unlocks plus the Leaderboard.
+    grant_unlocks(mcp, {"simulation", "leaderboard"}, from_original=True)
+
+
+def check_list_builtins(mcp):
+    def unlock_levels(locked, name):
+        return {(g["unlock"], g["level"]) for g in locked.get(name, [])}
+
+    builtins = ok(mcp, "list_builtins")
+    available, locked = builtins["available"], builtins["locked"]
+    assert set(available) == {"functions", "keywords", "entities", "items", "grounds", "hats"}, list(available)
+    assert "harvest" in available["functions"] and "harvest" not in locked, builtins
+    assert "pass" in available["keywords"] and "Grass" in available["entities"] and "Hay" in available["items"], available
+    assert ("expand", 2) in unlock_levels(locked, "for") and "for" not in available["keywords"], locked.get("for")
+    assert "speed" in {u for u, _ in unlock_levels(locked, "can_harvest")} and "can_harvest" not in available["functions"]
+    assert "operators" in locked and not {"and", "or", "not", "%"} & (set(locked) | set(available["keywords"])), locked.get("operators")
+    assert "Carrot" in locked and "Carrot" not in available["entities"], locked.get("Carrot")
+    measure = {u for u, _ in unlock_levels(locked, "measure")}
+    assert len(measure) > 1 and "mazes" in measure, measure
+    everything = set(locked) | {n for names in available.values() for n in names}
+    assert "get_drone_id" not in everything, "get_drone_id is not callable from a Script"
+    assert all(g["level"] >= 1 for grants in locked.values() for g in grants) and all(locked.values())
+    print(f"    {sum(len(v) for v in available.values())} available, {len(locked)} locked")
+
+    grant_unlocks(mcp, {"speed"})
+    after = ok(mcp, "list_builtins")
+    assert "can_harvest" in after["available"]["functions"] and "can_harvest" not in after["locked"], after
+    assert "if" in after["available"]["keywords"], after["available"]["keywords"]
 
 
 def check_leaderboard_run(mcp):
@@ -341,7 +374,7 @@ def check_docs(mcp):
 # Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it the original Save's Unlocks.
 CHECKS = [
     check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_docs,
-    check_scripts, check_grant_unlocks, check_run_finishes, check_run_timeout_wait_stop, check_run_parse_error,
+    check_scripts, check_list_builtins, check_grant_unlocks, check_run_finishes, check_run_timeout_wait_stop, check_run_parse_error,
     check_run_runtime_error, check_run_output_buffer, check_leaderboard_run, check_save_switch_ends_run,
 ]
 
