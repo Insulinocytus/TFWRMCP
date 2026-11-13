@@ -16,8 +16,14 @@ Point any MCP client (Streamable HTTP) at `http://127.0.0.1:47821`, for example:
 claude mcp add --transport http tfwr http://127.0.0.1:47821
 ```
 
-The port can be changed in `BepInEx/config/com.insulinocytus.tfwrmcp.cfg`. If it is already taken, the mod logs an
-error and leaves MCP disabled; the game itself runs normally. The server only listens on localhost.
+The server only listens on localhost. Its settings are in the game's options menu, on the **MCP** tab (also stored in
+`BepInEx/config/com.insulinocytus.tfwrmcp.cfg`):
+
+- **Port**: saved right away, used after the next restart.
+- **MCP server**: shows whether the server is listening; **Restart** listens again on the configured port. A tool
+  call in progress is dropped and the Input Lock released, but a Run keeps going. If the port is taken, the server
+  stays stopped and the reason shows here; the game itself runs normally.
+- **Don't open docs after an unlock**: stops the game from opening an Unlock's documentation when it is bought.
 
 ## Tools
 
@@ -34,3 +40,9 @@ the bottom-right corner (hover it to see the running tool). Input comes back as 
 Run is still going. Press **F10** during the lock to take control back: the Run is stopped (`stopped_by_user`) and the
 tool call returns "Interrupted by the user". F10 is reserved for this; if one of your key bindings uses it, the mod
 logs a warning at startup.
+
+## Unlock notices
+
+Every Unlock bought on your farm (by a tool, a script's `unlock()` or the tech tree) shows a notice in the
+bottom-left corner for a few seconds. Leaderboard runs and `simulate()` do not. The notices hide with the game's
+"hide UI" hotkey.

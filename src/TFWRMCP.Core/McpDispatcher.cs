@@ -31,6 +31,19 @@ public sealed class McpDispatcher
     readonly Action<string> log;
     readonly SemaphoreSlim toolGate = new(1, 1);
 
+    event Action Interrupted = delegate { };
+    int restarts;
+
+    /// <summary>
+    /// Abandons the Tool in progress like F10 does, except that a Run keeps going (the server restarts); calls still
+    /// waiting their turn are dropped.
+    /// </summary>
+    public void Interrupt()
+    {
+        Interlocked.Increment(ref restarts);
+        Interrupted();
+    }
+
     public McpDispatcher(IGame game, IEnumerable<Tool> tools, Action<string> log)
     {
         this.game = game;
@@ -112,6 +125,7 @@ public sealed class McpDispatcher
             return (200, Error(id, InvalidParams, "arguments must be an object"));
         var args = parameters["arguments"] as JObject ?? new JObject();
 
+        var epoch = Volatile.Read(ref restarts);
         await toolGate.WaitAsync();
         Task? abandoned = null;
         try
@@ -125,7 +139,7 @@ public sealed class McpDispatcher
                         "The game may have been updated; other tools are unaffected."));
             }
 
-            var (result, left) = await RunLocked(name, tool, args);
+            var (result, left) = await RunLocked(name, tool, args, epoch);
             abandoned = left;
             if (abandoned != null)
                 throw new ToolException("Interrupted by the user: the human pressed F10 and took back control. " +
@@ -153,31 +167,43 @@ public sealed class McpDispatcher
     /// Runs the Tool under the Input Lock. F10 cancels it, stops the Run and abandons it (the game has released the lock
     /// by then); the returned task completes once the abandoned work has stopped.
     /// </summary>
-    async Task<(object? Result, Task? Abandoned)> RunLocked(string name, Tool tool, JObject args)
+    async Task<(object? Result, Task? Abandoned)> RunLocked(string name, Tool tool, JObject args, int epoch)
     {
         var cancel = new CancellationTokenSource();
-        var takeover = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stop = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnTakeover()
         {
-            takeover.TrySetResult(true);
+            stop.TrySetResult(true);
+            cancel.Cancel();
+        }
+        void OnInterrupt()
+        {
+            stop.TrySetResult(false);
             cancel.Cancel();
         }
         game.UserTookOver += OnTakeover;
+        Interrupted += OnInterrupt;
         try
         {
+            // Subscribed first, so a restart either shows here or interrupts the work below.
+            if (epoch != Volatile.Read(ref restarts)) throw new ToolException("Dropped: the MCP server was restarted.");
             await game.SetInputLock(name);
             var work = Work(cancel.Token);
-            await Task.WhenAny(work, takeover.Task);
-            if (!takeover.Task.IsCompleted) return (await work, null);
+            await Task.WhenAny(work, stop.Task);
+            if (!stop.Task.IsCompleted) return (await work, null);
 
             var settled = Settle(work);
-            try { await game.StopRun(); }
-            catch (Exception e) { log($"Stopping the Run after the user interrupted '{name}' failed: {e}"); }
+            if (await stop.Task)
+            {
+                try { await game.StopRun(); }
+                catch (Exception e) { log($"Stopping the Run after the user interrupted '{name}' failed: {e}"); }
+            }
             return (null, settled);
         }
         finally
         {
             game.UserTookOver -= OnTakeover;
+            Interrupted -= OnInterrupt;
             await game.SetInputLock(null);
         }
 

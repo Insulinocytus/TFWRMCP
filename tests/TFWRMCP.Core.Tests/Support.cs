@@ -147,7 +147,7 @@ public sealed class TestServer : IDisposable
 {
     public McpServer Server { get; }
     public HttpClient Http { get; } = new();
-    public Uri Url { get; }
+    public Uri Url { get; private set; }
     public List<string> Log { get; } = new();
     int nextId = 1;
 
@@ -183,6 +183,14 @@ public sealed class TestServer : IDisposable
         var port = ((IPEndPoint)l.LocalEndpoint).Port;
         l.Stop();
         return port;
+    }
+
+    /// <summary>Restarts the server on a fresh port; Url follows it.</summary>
+    public void Restart()
+    {
+        var port = FreePort();
+        Server.Restart(port);
+        Url = new Uri($"http://127.0.0.1:{port}/");
     }
 
     public async Task<HttpResponseMessage> PostRaw(string body, string? origin = null)

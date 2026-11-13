@@ -18,6 +18,9 @@ public sealed class InputLock : MonoBehaviour
     const float IconSize = 48;
     const float Margin = 16;
 
+    internal static readonly Color Background = new(0f, 0f, 0f, 0.7f);
+    internal static readonly Color Glyph = new(1f, 0.8f, 0.2f);
+
     string? tool;
     InputBoss? inputBoss;
     EventSystem? eventSystem;
@@ -35,43 +38,38 @@ public sealed class InputLock : MonoBehaviour
         standIn = new GameObject("TFWRMCP EventSystem").AddComponent<EventSystem>();
         DontDestroyOnLoad(standIn.gameObject);
         standIn.enabled = false;
-        canvas = new GameObject("TFWRMCP Input Lock");
-        DontDestroyOnLoad(canvas);
-        var root = canvas.AddComponent<Canvas>();
-        root.renderMode = RenderMode.ScreenSpaceOverlay;
-        root.sortingOrder = short.MaxValue;
-        var scaler = canvas.AddComponent<CanvasScaler>();
-        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1920, 1080);
-        scaler.matchWidthOrHeight = 0.5f;
+        canvas = OverlayCanvas("TFWRMCP Input Lock", short.MaxValue);
 
-        var background = new Color(0f, 0f, 0f, 0.7f);
-        var glyph = new Color(1f, 0.8f, 0.2f);
-        icon = Box("Icon", canvas.transform, background, new Vector2(1, 0), new Vector2(-Margin, Margin), new Vector2(IconSize, IconSize));
-        Box("Body", icon, glyph, Vector2.zero, new Vector2(12, 8), new Vector2(24, 18));
-        Box("ShackleLeft", icon, glyph, Vector2.zero, new Vector2(15, 26), new Vector2(4, 12));
-        Box("ShackleRight", icon, glyph, Vector2.zero, new Vector2(29, 26), new Vector2(4, 12));
-        Box("ShackleTop", icon, glyph, Vector2.zero, new Vector2(15, 34), new Vector2(18, 4));
+        icon = Box("Icon", canvas.transform, Background, new Vector2(1, 0), new Vector2(-Margin, Margin), new Vector2(IconSize, IconSize));
+        Box("Body", icon, Glyph, Vector2.zero, new Vector2(12, 8), new Vector2(24, 18));
+        Box("ShackleLeft", icon, Glyph, Vector2.zero, new Vector2(15, 26), new Vector2(4, 12));
+        Box("ShackleRight", icon, Glyph, Vector2.zero, new Vector2(29, 26), new Vector2(4, 12));
+        Box("ShackleTop", icon, Glyph, Vector2.zero, new Vector2(15, 34), new Vector2(18, 4));
 
-        var box = Box("Tooltip", canvas.transform, background, new Vector2(1, 0), new Vector2(-(Margin * 2 + IconSize), Margin), new Vector2(380, IconSize));
+        var box = Box("Tooltip", canvas.transform, Background, new Vector2(1, 0), new Vector2(-(Margin * 2 + IconSize), Margin), new Vector2(380, IconSize));
         tooltip = box.gameObject;
-        var text = new GameObject("Text", typeof(RectTransform)).GetComponent<RectTransform>();
-        text.SetParent(box, false);
-        text.anchorMin = Vector2.zero;
-        text.anchorMax = Vector2.one;
-        text.offsetMin = new Vector2(12, 0);
-        text.offsetMax = new Vector2(-12, 0);
-        tooltipText = text.gameObject.AddComponent<Text>();
-        tooltipText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        tooltipText.fontSize = 18;
-        tooltipText.alignment = TextAnchor.MiddleLeft;
-        tooltipText.raycastTarget = false;
+        tooltipText = Label(box);
 
         tooltip.SetActive(false);
         canvas.SetActive(false);
     }
 
-    static RectTransform Box(string name, Transform parent, Color color, Vector2 anchor, Vector2 position, Vector2 size)
+    /// <summary>A screen overlay canvas of the Mod's own that survives scene reloads and the game's "hide UI".</summary>
+    internal static GameObject OverlayCanvas(string name, int sortingOrder)
+    {
+        var canvas = new GameObject(name);
+        DontDestroyOnLoad(canvas);
+        var root = canvas.AddComponent<Canvas>();
+        root.renderMode = RenderMode.ScreenSpaceOverlay;
+        root.sortingOrder = sortingOrder;
+        var scaler = canvas.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight = 0.5f;
+        return canvas;
+    }
+
+    internal static RectTransform Box(string name, Transform parent, Color color, Vector2 anchor, Vector2 position, Vector2 size)
     {
         var rect = new GameObject(name, typeof(RectTransform)).GetComponent<RectTransform>();
         rect.SetParent(parent, false);
@@ -82,6 +80,23 @@ public sealed class InputLock : MonoBehaviour
         image.color = color;
         image.raycastTarget = false;
         return rect;
+    }
+
+    /// <summary>Left-aligned text filling the box.</summary>
+    internal static Text Label(RectTransform box)
+    {
+        var rect = new GameObject("Text", typeof(RectTransform)).GetComponent<RectTransform>();
+        rect.SetParent(box, false);
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = new Vector2(12, 0);
+        rect.offsetMax = new Vector2(-12, 0);
+        var text = rect.gameObject.AddComponent<Text>();
+        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.fontSize = 18;
+        text.alignment = TextAnchor.MiddleLeft;
+        text.raycastTarget = false;
+        return text;
     }
 
     /// <summary>Locks for the named Tool, or unlocks when null. Idempotent.</summary>

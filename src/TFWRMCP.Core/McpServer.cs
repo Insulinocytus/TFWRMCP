@@ -10,7 +10,7 @@ namespace TFWRMCP;
 /// <summary>Streamable HTTP transport (POST, JSON responses only) bound to 127.0.0.1.</summary>
 public sealed class McpServer : IDisposable
 {
-    readonly HttpListener listener = new();
+    HttpListener listener = new();
     readonly McpDispatcher dispatcher;
     readonly Action<string> log;
 
@@ -21,32 +21,48 @@ public sealed class McpServer : IDisposable
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
     }
 
+    public bool IsListening => listener.IsListening;
+
     /// <summary>Throws when the port cannot be bound.</summary>
     public void Start()
     {
         listener.Start();
-        _ = Task.Run(AcceptLoop);
+        var accepting = listener;
+        _ = Task.Run(() => AcceptLoop(accepting));
     }
 
-    async Task AcceptLoop()
+    /// <summary>
+    /// Drops every open request, interrupts the Tool in progress (the Input Lock is released; a Run keeps going) and
+    /// listens on the port again. Throws when the port cannot be bound, leaving the server stopped.
+    /// </summary>
+    public void Restart(int port)
     {
-        while (listener.IsListening)
+        listener.Close();
+        dispatcher.Interrupt();
+        listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        Start();
+    }
+
+    async Task AcceptLoop(HttpListener accepting)
+    {
+        while (accepting.IsListening)
         {
             HttpListenerContext context;
             try
             {
-                context = await listener.GetContextAsync();
+                context = await accepting.GetContextAsync();
             }
             catch (Exception e) when (e is HttpListenerException or ObjectDisposedException or InvalidOperationException)
             {
                 return;
             }
 
-            _ = Task.Run(() => Serve(context));
+            _ = Task.Run(() => Serve(context, accepting));
         }
     }
 
-    async Task Serve(HttpListenerContext context)
+    async Task Serve(HttpListenerContext context, HttpListener accepting)
     {
         var response = context.Response;
         try
@@ -72,7 +88,8 @@ public sealed class McpServer : IDisposable
         }
         catch (Exception e)
         {
-            log($"Request failed: {e}");
+            // Requests of a listener a restart has closed are dropped on purpose.
+            if (accepting == listener) log($"Request failed: {e}");
             try { response.Abort(); } catch { /* connection already gone */ }
         }
     }

@@ -7,26 +7,54 @@ namespace TFWRMCP.Mod;
 [BepInPlugin("com.insulinocytus.tfwrmcp", "TFWRMCP", "0.1.0")]
 public sealed class Plugin : BaseUnityPlugin
 {
-    ConfigEntry<int> port = null!;
     McpServer? server;
+
+    public ConfigEntry<int> Port { get; private set; } = null!;
+
+    public ConfigEntry<bool> SuppressUnlockDocs { get; private set; } = null!;
+
+    /// <summary>Set when the server is not listening: why.</summary>
+    public string? ServerError { get; private set; }
+
+    public int ListeningPort { get; private set; }
 
     void Awake()
     {
-        port = Config.Bind("Server", "Port", 47821, new ConfigDescription(
-            "Localhost port the MCP server listens on.", new AcceptableValueRange<int>(1, 65535)));
+        Port = Config.Bind("Server", "Port", 47821, new ConfigDescription(
+            "Localhost port the MCP server listens on. Changes apply when the server is restarted from the game's MCP options.",
+            new AcceptableValueRange<int>(1, 65535)));
+        SuppressUnlockDocs = Config.Bind("Game", "SuppressUnlockDocs", false,
+            "Do not open an Unlock's documentation automatically when it is bought.");
 
         var game = new GameAdapter(Logger.LogWarning, Logger.LogInfo, gameObject.AddComponent<InputLock>());
-        server = new McpServer(game, Tools.Create(game, Logger.LogError), port.Value, Logger.LogError);
+        server = new McpServer(game, Tools.Create(game, Logger.LogError), Port.Value, Logger.LogError);
+        Listen(server.Start, Port.Value);
+
+        Patching.Configure(Logger.LogWarning);
+        gameObject.AddComponent<UnlockToastOverlay>().Install(this);
+        McpOptions.Install(this);
+    }
+
+    /// <summary>Interrupts the Tool in progress and listens on the configured port again.</summary>
+    public void RestartServer()
+    {
+        Logger.LogInfo("restarting the MCP server");
+        Listen(() => server!.Restart(Port.Value), Port.Value);
+    }
+
+    void Listen(Action start, int on)
+    {
         try
         {
-            server.Start();
-            Logger.LogInfo($"MCP server listening on http://127.0.0.1:{port.Value}/");
+            start();
+            ListeningPort = on;
+            ServerError = null;
+            Logger.LogInfo($"MCP server listening on http://127.0.0.1:{on}/");
         }
         catch (Exception e)
         {
-            Logger.LogError($"MCP disabled: cannot listen on 127.0.0.1:{port.Value} ({e.Message}). Change [Server] Port in the BepInEx config.");
-            server.Dispose();
-            server = null;
+            ServerError = e.Message;
+            Logger.LogError($"MCP disabled: cannot listen on 127.0.0.1:{on} ({e.Message}). Change the port in the game's MCP options and restart the server.");
         }
     }
 
