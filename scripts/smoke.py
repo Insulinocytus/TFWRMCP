@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Smoke test against the real game (stdlib only).
 
-Launches the game through Steam unless MCP already answers, waits for the port, then runs every check against
-the live Mod and prints PASS/FAIL per check. Exit code is 0 only if all checks pass.
+Launches the game through Steam unless MCP already answers, waits for the port, records the current Save, creates
+a test Save, runs every check on it and finally loads the original Save back (even if checks fail). Prints PASS/FAIL
+per step. Exit code is 0 only if all steps pass. Test Saves (smoke-<timestamp>) stay in the game's Saves folder.
 
 Usage: python scripts/smoke.py [--port 47821] [--startup-timeout 240] [--no-launch]
 
-Later tickets append checks to CHECKS; checks that modify the Save must run on the test Save.
+Later tickets append checks to CHECKS; they run on the test Save, so checks may modify the Save freely.
 """
 import argparse
 import json
@@ -25,7 +26,7 @@ class Mcp:
         self.url = f"http://127.0.0.1:{port}/"
         self.next_id = 1
 
-    def post(self, message, timeout=30):
+    def post(self, message, timeout=120):
         req = urllib.request.Request(
             self.url, json.dumps(message).encode(), {"Content-Type": "application/json"}
         )
@@ -95,6 +96,32 @@ def check_tools_list(mcp):
     assert tools["get_state"]["description"] and tools["get_state"]["inputSchema"]["type"] == "object"
 
 
+def check_saves(mcp):
+    test, original = mcp.test_save, mcp.original_save
+    is_error, saves = mcp.call("list_saves")
+    assert not is_error and saves["current"] == test and test in saves["saves"] and original in saves["saves"], saves
+
+    for bad in ("bad/name", "CON", "", test, test.upper()):
+        is_error, text = mcp.call("create_save", name=bad)
+        assert is_error, f"create_save accepted {bad!r}"
+        assert "Invalid Save name" in text or "already exists" in text, text
+    is_error, text = mcp.call("load_save", name="no-such-save-" + test)
+    assert is_error and test in text, text
+
+    is_error, result = mcp.call("save_game")
+    assert not is_error and result == {"saved": True}, result
+
+    # Each switch reloads the scene; the call must only return once the other Save is loaded and playable.
+    for target in (original, test):
+        is_error, result = mcp.call("load_save", name=target)
+        assert not is_error and result == {"save": target}, result
+        is_error, state = mcp.call("get_state")
+        assert not is_error and state["save"] == target, state
+        assert len(mcp.rpc("tools/list")["tools"]) >= 5, "tools/list broken after scene reload"
+    is_error, saves = mcp.call("list_saves")
+    assert not is_error and saves["current"] == test, saves
+
+
 def check_get_state(mcp):
     is_error, state = mcp.call("get_state")
     assert not is_error, state
@@ -112,7 +139,7 @@ def check_get_state(mcp):
     print(f"    save={state['save']} world={size['x']}x{size['y']} unlocks={len(state['unlocks'])} run={state['run']['status']}")
 
 
-CHECKS = [check_handshake, check_tools_list, check_get_state]
+CHECKS = [check_handshake, check_tools_list, check_get_state, check_saves]
 
 
 def main():
@@ -126,14 +153,43 @@ def main():
     ensure_game(mcp, not args.no_launch, args.startup_timeout)
 
     failed = 0
-    for check in CHECKS:
+    total = 0
+
+    def step(fn):
+        nonlocal failed, total
+        total += 1
         try:
-            check(mcp)
-            print(f"PASS {check.__name__}")
-        except Exception as e:  # report and continue with the remaining checks
+            fn(mcp)
+            print(f"PASS {fn.__name__}")
+            return True
+        except Exception as e:  # report and continue with the remaining steps
             failed += 1
-            print(f"FAIL {check.__name__}: {type(e).__name__}: {e}")
-    print(f"{len(CHECKS) - failed}/{len(CHECKS)} checks passed")
+            print(f"FAIL {fn.__name__}: {type(e).__name__}: {e}")
+            return False
+
+    def setup_test_save(mcp):
+        is_error, saves = mcp.call("list_saves")  # also dismisses the title menu after a fresh start
+        assert not is_error, saves
+        mcp.original_save = saves["current"]
+        mcp.test_save = time.strftime("smoke-%Y%m%d-%H%M%S")
+        is_error, result = mcp.call("create_save", name=mcp.test_save)
+        assert not is_error and result == {"save": mcp.test_save}, result
+        is_error, state = mcp.call("get_state")
+        assert not is_error and state["save"] == mcp.test_save, state
+        print(f"    original Save={mcp.original_save} test Save={mcp.test_save}")
+
+    def restore_original_save(mcp):
+        is_error, result = mcp.call("load_save", name=mcp.original_save)
+        assert not is_error, result
+        is_error, state = mcp.call("get_state")
+        assert not is_error and state["save"] == mcp.original_save, state
+
+    if step(setup_test_save):
+        for check in CHECKS:
+            step(check)
+    if hasattr(mcp, "original_save"):
+        step(restore_original_save)
+    print(f"{total - failed}/{total} steps passed")
     return 1 if failed else 0
 
 

@@ -23,8 +23,70 @@ public sealed class FakeGame : IGame
     public string? UnavailableReason(string capability) =>
         Unavailable.TryGetValue(capability, out var reason) ? reason : null;
 
+    public GameScene Scene { get; set; } = GameScene.Playing;
+    public List<string> Saves { get; } = new() { "Save0" };
+    public string CurrentSave { get; set; } = "Save0";
+    public bool SaveFails { get; set; }
+
+    /// <summary>Calls to GetScene that still report Loading after a LoadSave, before the title menu shows up.</summary>
+    public int ReloadPolls { get; set; } = 3;
+
+    /// <summary>Everything the Game was asked to do that changes the world, in order.</summary>
+    public List<string> Events { get; } = new();
+    int loadingPolls;
+
+    public Task<GameScene> GetScene()
+    {
+        if (Scene == GameScene.Loading && loadingPolls-- <= 0) Scene = GameScene.TitleMenu;
+        return Task.FromResult(Scene);
+    }
+
+    public Task CloseTitleMenu()
+    {
+        Events.Add("close_menu");
+        Scene = GameScene.Playing;
+        return Task.CompletedTask;
+    }
+
+    public Task<SaveList> ListSaves()
+    {
+        var list = new SaveList { Current = CurrentSave };
+        list.Saves.AddRange(Saves);
+        return Task.FromResult(list);
+    }
+
+    public Task<bool> IsValidSaveName(string name) => Task.FromResult(!name.Contains('/') && name.Length > 0);
+
+    public Task<string> GenerateSaveName() => Task.FromResult("Save" + Saves.Count);
+
+    public Task CreateSave(string name)
+    {
+        Events.Add("create:" + name);
+        Saves.Add(name);
+        return Task.CompletedTask;
+    }
+
+    public Task LoadSave(string name)
+    {
+        if (SaveFails) throw new ToolException("Saving the current Save failed.");
+        Events.Add("save:" + CurrentSave);
+        Events.Add("load:" + name);
+        CurrentSave = name;
+        Scene = GameScene.Loading;
+        loadingPolls = ReloadPolls;
+        return Task.CompletedTask;
+    }
+
+    public Task SaveGame()
+    {
+        if (SaveFails) throw new ToolException("Saving failed.");
+        Events.Add("save:" + CurrentSave);
+        return Task.CompletedTask;
+    }
+
     public async Task<GameState> GetState()
     {
+        if (Scene != GameScene.Playing) throw new InvalidOperationException("a Tool ran while the game was not playable");
         var now = Interlocked.Increment(ref inFlight);
         Calls++;
         MaxConcurrentCalls = Math.Max(MaxConcurrentCalls, now);

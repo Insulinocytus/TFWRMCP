@@ -124,6 +124,7 @@ public sealed class McpDispatcher
                         "The game may have been updated; other tools are unaffected."));
             }
 
+            await Readiness.Ensure(game);
             var result = await tool.Handler(args);
             return Ok(id, ToolResult(false, JToken.FromObject(result ?? new JObject(), Serializer).ToString(Formatting.None)));
         }
