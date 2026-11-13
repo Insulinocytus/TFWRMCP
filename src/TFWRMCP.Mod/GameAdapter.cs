@@ -29,8 +29,9 @@ public sealed partial class GameAdapter : IGame
     public event Action<RunEvent> RunEvents = delegate { };
 
     /// <summary>Resolves every reflection target up front; failures are logged and degrade only the dependent Tools.</summary>
-    public GameAdapter(Action<string> warn)
+    public GameAdapter(Action<string> warn, InputLock inputLock)
     {
+        this.inputLock = inputLock;
         simField = Resolve(Capabilities.State, typeof(MainSim).GetField("sim", NonPublic), "MainSim.sim", warn);
         lockField = Resolve(Capabilities.State, typeof(MainSim).GetField("lockSimulation", NonPublic), "MainSim.lockSimulation", warn);
 
@@ -242,7 +243,10 @@ public sealed partial class GameAdapter : IGame
         return new SyntaxError { Message = RunHooks.Plain(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
     });
 
-    public Task StopRun() => MainThread.Run(() => MainSim.Inst.StopMainExecution());
+    public Task StopRun() => MainThread.Run(() =>
+    {
+        if (MainSim.Inst.IsExecuting()) MainSim.Inst.StopMainExecution();
+    });
 
     GameState ReadState()
     {

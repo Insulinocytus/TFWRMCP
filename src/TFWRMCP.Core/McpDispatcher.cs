@@ -124,8 +124,7 @@ public sealed class McpDispatcher
                         "The game may have been updated; other tools are unaffected."));
             }
 
-            await Readiness.Ensure(game);
-            var result = await tool.Handler(args);
+            var result = await RunLocked(name, tool, args);
             return Ok(id, ToolResult(false, JToken.FromObject(result ?? new JObject(), Serializer).ToString(Formatting.None)));
         }
         catch (ToolException e)
@@ -140,6 +139,37 @@ public sealed class McpDispatcher
         finally
         {
             toolGate.Release();
+        }
+    }
+
+    /// <summary>Runs the Tool under the Input Lock. F10 abandons it (the game has released the lock by then) and stops the Run.</summary>
+    async Task<object?> RunLocked(string name, Tool tool, JObject args)
+    {
+        var takeover = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnTakeover() => takeover.TrySetResult(true);
+        game.UserTookOver += OnTakeover;
+        try
+        {
+            await game.SetInputLock(name);
+            var work = Work();
+            if (await Task.WhenAny(work, takeover.Task) == work) return await work;
+
+            _ = work.ContinueWith(t => log($"Tool '{name}' failed after the user interrupted it: {t.Exception}"),
+                TaskContinuationOptions.OnlyOnFaulted);
+            await game.StopRun();
+            throw new ToolException("Interrupted by the user: the human pressed F10 and took back control. " +
+                "Any Run in progress was stopped (status stopped_by_user); the Tool's effects may be incomplete.");
+        }
+        finally
+        {
+            game.UserTookOver -= OnTakeover;
+            await game.SetInputLock(null);
+        }
+
+        async Task<object?> Work()
+        {
+            await Readiness.Ensure(game);
+            return await tool.Handler(args);
         }
     }
 

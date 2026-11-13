@@ -115,6 +115,8 @@ public class GetStateTests
         public event Action<RunEvent> RunEvents { add { } remove { } }
         public Task<UnlockFacts?> GetUnlockFacts(string name) => throw new NotSupportedException();
         public Task<bool> BuyUnlock(string name) => throw new NotSupportedException();
+        public Task SetInputLock(string? tool) => Task.CompletedTask;
+        public event Action UserTookOver { add { } remove { } }
         public Task<string> ReadDoc(string page) => throw new NotSupportedException();
     }
 }

@@ -26,3 +26,11 @@ tile's entity and ground, and the Run status.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.
+
+## Input Lock
+
+While a tool call runs, the game ignores your mouse, keyboard, hotkeys and scroll wheel, and a lock icon shows in
+the bottom-right corner (hover it to see the running tool). Input comes back as soon as the call returns, even if a
+Run is still going. Press **F10** during the lock to take control back: the Run is stopped (`stopped_by_user`) and the
+tool call returns "Interrupted by the user". F10 is reserved for this; if one of your key bindings uses it, the mod
+logs a warning at startup.
