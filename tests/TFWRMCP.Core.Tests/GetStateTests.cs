@@ -46,6 +46,16 @@ public class GetStateTests
         Assert.Equal("dirt", (string)tiles[1]![1]!["ground"]!);
         Assert.Equal(2, (int)tiles[1]![1]!["depth"]!);
 
+        Assert.True((bool)tiles[0]![0]!["harvestable"]!);
+        Assert.Equal(0.25, (double)tiles[1]![0]!["water"]!);
+        Assert.Equal(0.5, (double)tiles[1]![0]!["grown"]!);
+        foreach (var tile in new[] { tiles[0]![1]!, tiles[1]![1]! })
+            foreach (var name in new[] { "harvestable", "water", "grown" })
+                Assert.Null(tile[name]);
+        Assert.Null(tiles[0]![0]!["water"]);
+        Assert.Null(tiles[0]![0]!["grown"]);
+        Assert.Null(tiles[1]![0]!["harvestable"]);
+
         Assert.Equal("idle", (string)state["run"]!["status"]!);
     }
 

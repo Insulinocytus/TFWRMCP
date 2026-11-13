@@ -27,7 +27,10 @@ public sealed class DroneState
     public int Depth { get; set; }
 }
 
-/// <summary>One tile; in JSON a missing entity means the tile is empty and a missing depth means 0.</summary>
+/// <summary>
+/// One tile; in JSON a missing entity means the tile is empty, a missing depth means 0, a missing harvestable means
+/// false, a missing water means 0 and a missing grown means the entity is fully grown or has no growth progress.
+/// </summary>
 public sealed class TileState
 {
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
@@ -37,6 +40,18 @@ public sealed class TileState
 
     [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
     public int Depth { get; set; }
+
+    /// <summary>Same test as the Script's can_harvest().</summary>
+    [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+    public bool Harvestable { get; set; }
+
+    /// <summary>Water level 0-1, rounded to 2 decimals.</summary>
+    [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+    public double Water { get; set; }
+
+    /// <summary>Growth progress 0-1, rounded to 2 decimals; only for a growing entity that is not yet mature.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public double? Grown { get; set; }
 }
 
 public sealed class GameState

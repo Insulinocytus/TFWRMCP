@@ -28,7 +28,8 @@ The server only listens on localhost. Its settings are in the game's options men
 ## Tools
 
 `get_state` returns the Save name, inventory, Unlock levels and next costs, world size, drone positions, every
-tile's entity and ground, and the Run status.
+tile as `tiles[y][x]` (`tiles[0][0]` is (0, 0); y grows north, x grows east) with its ground, entity, whether it can
+be harvested, water level and growth progress, and the Run status.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.

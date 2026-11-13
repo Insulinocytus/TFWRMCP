@@ -289,6 +289,34 @@ def check_leaderboard_run(mcp):
     assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
 
 
+def check_tile_fields(mcp):
+    # Plant a bush under the drone, water it and leave the Script looping: the tile must show water and growth, then maturity.
+    ok(mcp, "write_script", name="smoke_tile", code=(
+        "while num_items(Items.Water) < 1:\n    do_a_flip()\n"
+        "clear()\nplant(Entities.Bush)\nuse_item(Items.Water)\nwhile True:\n    do_a_flip()\n"))
+    assert ok(mcp, "run_script", name="smoke_tile", timeout_seconds=1)["status"] == "running"
+
+    def drone_tile():
+        state = ok(mcp, "get_state")
+        drone = state["drones"][0]
+        return state["tiles"][drone["y"]][drone["x"]]
+
+    def wait_tile(done):
+        deadline = time.time() + 90
+        while time.time() < deadline:
+            tile = drone_tile()
+            if tile.get("entity") == "bush" and done(tile):
+                return tile
+            time.sleep(0.1)
+        raise AssertionError(f"tile never reached the expected state: {drone_tile()}")
+
+    young = wait_tile(lambda t: t.get("water", 0) > 0)
+    assert 0 <= young["grown"] < 1 and "harvestable" not in young, young
+    mature = wait_tile(lambda t: t.get("harvestable"))
+    assert mature["harvestable"] is True and "grown" not in mature, mature
+    ok(mcp, "stop_run")
+
+
 def check_save_switch_ends_run(mcp):
     run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=1)
     ok(mcp, "load_save", name=mcp.other_save)
@@ -342,7 +370,7 @@ def check_docs(mcp):
 CHECKS = [
     check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_docs,
     check_scripts, check_grant_unlocks, check_run_finishes, check_run_timeout_wait_stop, check_run_parse_error,
-    check_run_runtime_error, check_run_output_buffer, check_leaderboard_run, check_save_switch_ends_run,
+    check_run_runtime_error, check_run_output_buffer, check_leaderboard_run, check_tile_fields, check_save_switch_ends_run,
 ]
 
 
