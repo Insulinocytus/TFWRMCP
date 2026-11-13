@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>TFWRMCP</AssemblyName>
+    <RootNamespace>TFWRMCP.Mod</RootNamespace>
+    <Version>0.1.0</Version>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <DebugType>embedded</DebugType>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- true: also copy the staged plugin into $(GameRoot)/BepInEx/plugins (close the game first). -->
+    <Deploy Condition="'$(Deploy)' == ''">false</Deploy>
+    <ManagedDir>$(GameRoot)\TheFarmerWasReplaced_Data\Managed</ManagedDir>
+    <DistDir>$(MSBuildThisFileDirectory)..\..\dist</DistDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TFWRMCP.Core\TFWRMCP.Core.csproj" />
+    <Reference Include="BepInEx"><HintPath>$(GameRoot)\BepInEx\core\BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>$(GameRoot)\BepInEx\core\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Core"><HintPath>$(ManagedDir)\Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Utils"><HintPath>$(ManagedDir)\Utils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageFile Include="$(MSBuildThisFileDirectory)..\..\package\manifest.json;$(MSBuildThisFileDirectory)..\..\package\icon.png;$(MSBuildThisFileDirectory)..\..\package\README.md" />
+  </ItemGroup>
+
+  <!-- Builds dist/BepInEx/plugins/TFWRMCP/ (manual install layout) and dist/TFWRMCP-<version>.zip (Thunderstore / r2modman). -->
+  <Target Name="Package" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup>
+      <PluginFile Include="$(OutDir)TFWRMCP.dll;$(OutDir)TFWRMCP.Core.dll;$(OutDir)Newtonsoft.Json.dll" />
+    </ItemGroup>
+    <PropertyGroup>
+      <PluginDir>$(DistDir)\BepInEx\plugins\TFWRMCP</PluginDir>
+      <ZipRoot>$(DistDir)\thunderstore</ZipRoot>
+      <ZipFile>$(DistDir)\TFWRMCP-$(Version).zip</ZipFile>
+    </PropertyGroup>
+    <RemoveDir Directories="$(DistDir)" />
+    <Copy SourceFiles="@(PluginFile)" DestinationFolder="$(PluginDir)" />
+    <Copy SourceFiles="@(PluginFile);@(PackageFile)" DestinationFolder="$(ZipRoot)" />
+    <ZipDirectory SourceDirectory="$(ZipRoot)" DestinationFile="$(ZipFile)" />
+    <Copy Condition="'$(Deploy)' == 'true'" SourceFiles="@(PluginFile)" DestinationFolder="$(GameRoot)\BepInEx\plugins\TFWRMCP" />
+    <Message Importance="high" Text="Packaged $(ZipFile)" />
+  </Target>
+</Project>

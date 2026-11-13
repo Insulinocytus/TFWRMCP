@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Override with -p:GameRoot=... ; only used at build time to locate game assemblies. -->
+    <GameRoot Condition="'$(GameRoot)' == ''">c:\root\games\steam\steamapps\common\The Farmer Was Replaced</GameRoot>
+  </PropertyGroup>
+</Project>
