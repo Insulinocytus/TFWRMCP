@@ -268,8 +268,8 @@ def grant_unlocks(mcp, extra, from_original=False):
 
 
 def check_grant_unlocks(mcp):
-    # A fresh Save lacks print/range/simulate/leaderboards: give the test Save the original Save's Unlocks plus the Leaderboard.
-    grant_unlocks(mcp, {"simulation", "leaderboard"}, from_original=True)
+    # A fresh Save lacks print/get_cost/simulate/leaderboards: give the test Save the original Save's Unlocks plus those.
+    grant_unlocks(mcp, {"debug", "costs", "simulation", "leaderboard"}, from_original=True)
 
 
 def check_list_builtins(mcp):
