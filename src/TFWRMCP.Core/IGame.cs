@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace TFWRMCP;
@@ -13,6 +14,9 @@ public static class Capabilities
     public const string Run = "run";
     public const string Unlock = "unlock";
     public const string Docs = "docs";
+
+    /// <summary>Dismissing the title menu; needed by every Tool, but only when the menu is actually open.</summary>
+    public const string TitleMenu = "title_menu";
 }
 
 public enum GameScene
@@ -58,8 +62,10 @@ public interface IGame
     /// <summary>
     /// Persists the current Save, then starts reloading the scene with <paramref name="name"/> active. Returns as soon
     /// as the reload has started: <see cref="GetScene"/> must report Loading from then until the new scene is up.
+    /// Throws <see cref="OperationCanceledException"/> without reloading when <paramref name="cancel"/> is cancelled
+    /// by the time the game would act.
     /// </summary>
-    Task LoadSave(string name);
+    Task LoadSave(string name, CancellationToken cancel);
 
     /// <summary>Writes the current Save to disk; returns once it is persisted.</summary>
     Task SaveGame();
@@ -82,9 +88,11 @@ public interface IGame
     /// <summary>
     /// Same as the human clicking run on the Script's code window. Throws a <see cref="ToolException"/> when the Script
     /// does not exist or any Run is in progress. Returns the syntax error when the Script does not parse, otherwise
-    /// null once the Run has started (<see cref="RunStarted"/> has been raised by then).
+    /// null once the Run has started (<see cref="RunStarted"/> has been raised by then). Throws
+    /// <see cref="OperationCanceledException"/> without starting anything when <paramref name="cancel"/> is cancelled
+    /// by the time the game would act.
     /// </summary>
-    Task<SyntaxError?> StartRun(string name);
+    Task<SyntaxError?> StartRun(string name, CancellationToken cancel);
 
     /// <summary>Same as the human clicking stop: ends the current Run (or Leaderboard Run); raises <see cref="RunEnded"/>.</summary>
     Task StopRun();
@@ -95,11 +103,11 @@ public interface IGame
     /// </summary>
     event Action<RunEvent> RunEvents;
 
-    /// <summary>Facts the Unlock checks need, as the research menu sees the Unlock; null when no such Unlock is listed there.</summary>
-    Task<UnlockFacts?> GetUnlockFacts(string name);
-
-    /// <summary>Buys or upgrades the Unlock exactly like the research menu does (including its hat); false if the game refused.</summary>
-    Task<bool> BuyUnlock(string name);
+    /// <summary>
+    /// Looks the Unlock up as the research menu does and, in the same game tick, buys or upgrades it (including its
+    /// hat) when <paramref name="whyNot"/> returns null for its facts. Facts are null when no such Unlock is listed.
+    /// </summary>
+    Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot);
 
     /// <summary>
     /// Starts (<paramref name="tool"/> is the running Tool's name) or ends (null) the Input Lock: while it lasts the

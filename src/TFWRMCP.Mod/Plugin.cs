@@ -15,8 +15,8 @@ public sealed class Plugin : BaseUnityPlugin
         port = Config.Bind("Server", "Port", 47821, new ConfigDescription(
             "Localhost port the MCP server listens on.", new AcceptableValueRange<int>(1, 65535)));
 
-        var game = new GameAdapter(Logger.LogWarning, gameObject.AddComponent<InputLock>());
-        server = new McpServer(game, Tools.Create(game), port.Value, Logger.LogError);
+        var game = new GameAdapter(Logger.LogWarning, Logger.LogInfo, gameObject.AddComponent<InputLock>());
+        server = new McpServer(game, Tools.Create(game, Logger.LogError), port.Value, Logger.LogError);
         try
         {
             server.Start();

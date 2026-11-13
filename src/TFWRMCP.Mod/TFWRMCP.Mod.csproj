@@ -7,7 +7,7 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <DebugType>embedded</DebugType>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <!-- true: also copy the staged plugin into $(GameRoot)/BepInEx/plugins (close the game first). -->
+    <!-- true: also copy the staged Mod into $(GameRoot)/BepInEx/plugins (close the game first). -->
     <Deploy Condition="'$(Deploy)' == ''">false</Deploy>
     <ManagedDir>$(GameRoot)\TheFarmerWasReplaced_Data\Managed</ManagedDir>
     <DistDir>$(MSBuildThisFileDirectory)..\..\dist</DistDir>

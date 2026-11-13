@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 using TFWRMCP;
@@ -52,8 +53,9 @@ public sealed partial class FakeGame
         return Task.CompletedTask;
     }
 
-    public Task<SyntaxError?> StartRun(string name)
+    public Task<SyntaxError?> StartRun(string name, CancellationToken cancel)
     {
+        cancel.ThrowIfCancellationRequested();
         if (!Scripts.ContainsKey(name)) throw new ToolException($"No Script named '{name}'.");
         if (RunActive) throw new ToolException("A Run is already in progress.");
         if (SyntaxErrors.TryGetValue(name, out var error)) return Task.FromResult<SyntaxError?>(error);

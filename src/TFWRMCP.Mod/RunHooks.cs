@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,7 +16,6 @@ public static class RunHooks
 
     static Action<RunEvent> emit = _ => { };
     static Action<string> log = _ => { };
-    static FieldInfo simField = null!;
 
     // Set by the stop hook, consumed by whatever ends the Run: tells Stopped from Terminated.
     static volatile bool stopRequested;
@@ -35,11 +33,10 @@ public static class RunHooks
 
     static PendingLeaderboard? pendingLeaderboard;
 
-    public static void Configure(Action<RunEvent> emitEvent, Action<string> logError, FieldInfo mainSimSim)
+    public static void Configure(Action<RunEvent> emitEvent, Action<string> logError)
     {
         emit = emitEvent;
         log = logError;
-        simField = mainSimSim;
     }
 
     static bool IsMainLogger(global::Logger logger)
@@ -56,19 +53,16 @@ public static class RunHooks
         catch (Exception e) { log($"Run hook {hook} failed: {e}"); }
     }
 
-    /// <summary>Game text carries TextMeshPro syntax-colour tags for its UI; the Agent gets plain text.</summary>
-    public static string Plain(string text) => CodeUtilities.RemoveSyntaxTags(text);
-
     // Logger.WriteLog(string logMessage, bool addSeparator), prefix.
     public static void WriteLog(global::Logger __instance, string __0, bool __1) => Safely(nameof(WriteLog), () =>
     {
         if (!IsMainLogger(__instance)) return;
-        var message = Plain(__1 ? __0 + "\n" + Separator : __0);
+        var message = CodeUtilities.RemoveSyntaxTags(__1 ? __0 + "\n" + Separator : __0);
         if (message.Length > global::Logger.MESSAGE_LENGTH_LIMIT) message = message.Substring(0, global::Logger.MESSAGE_LENGTH_LIMIT);
         emit(new RunOutput(message));
     });
 
-    // Logger.LogError(string errorMessage, ProgramState state), prefix. The game leaves the Run paused on the error.
+    // Logger.LogError(string errorMessage, ProgramState state), prefix. The game leaves the Run paused on the error; Core stops it.
     public static void LogError(global::Logger __instance, string __0, ProgramState __1) => Safely(nameof(LogError), () =>
     {
         if (!IsMainLogger(__instance)) return;
@@ -80,20 +74,11 @@ public static class RunHooks
         try { stack = __1.GetTrace(); }
         catch (Exception) { stack = ""; }
 
-        var sim = (Simulation?)simField.GetValue(MainSim.Inst);
-        var execution = sim?.Execution;
-        emit(new RunErrored(Plain(__0), Plain(stack), window?.fileName, window?.CodeInput.text, start));
-        MainThread.Post(() => StopAfterError(execution));
+        // Unity objects must be checked with ==, which ?. would skip.
+        var file = window != null ? window.fileName : null;
+        var source = window != null ? window.CodeInput.text : null;
+        emit(new RunErrored(CodeUtilities.RemoveSyntaxTags(__0), CodeUtilities.RemoveSyntaxTags(stack), file, source, start));
     });
-
-    static void StopAfterError(Execution? failed)
-    {
-        var main = MainSim.Inst;
-        if (main == null) return;
-        var sim = (Simulation?)simField.GetValue(main);
-        // The human may have stopped or restarted in the meantime.
-        if (sim != null && failed != null && ReferenceEquals(sim.Execution, failed)) main.StopMainExecution();
-    }
 
     // MainSim.StartMainExecution(CodeWindow, Node, bool), prefix: whoever starts a Run, it is tracked.
     public static void StartMainExecution(MainSim __instance, CodeWindow __0) => Safely(nameof(StartMainExecution), () =>
@@ -145,8 +130,9 @@ public static class RunHooks
     static void FinishLeaderboard(PendingLeaderboard pending)
     {
         if (Interlocked.CompareExchange(ref pendingLeaderboard, null, pending) != pending) return;
-        var manager = MainSim.Inst.leaderboardManager;
-        if (manager.IsLeaderBoardScreenOpen) manager.OkPressed();
+        // A scene reload during the rank wait destroys MainSim; the Run must still end.
+        var main = MainSim.Inst;
+        if (main != null && main.leaderboardManager.IsLeaderBoardScreenOpen) main.leaderboardManager.OkPressed();
         emit(new LeaderboardFinished(pending.ReachedGoal, pending.Seconds, pending.Rank));
         emit(new RunEnded(pending.Cancelled ? RunEnd.Stopped : RunEnd.Terminated));
     }

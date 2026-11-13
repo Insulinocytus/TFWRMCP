@@ -115,6 +115,7 @@ public class UnlockToolTests
 
         Assert.True(isError);
         Assert.Contains("Leaderboard Run", text);
+        Assert.Contains("simulate()", text);
         Assert.Empty(game.Events);
     }
 

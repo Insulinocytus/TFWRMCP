@@ -113,6 +113,7 @@ public sealed class McpDispatcher
         var args = parameters["arguments"] as JObject ?? new JObject();
 
         await toolGate.WaitAsync();
+        Task? abandoned = null;
         try
         {
             foreach (var capability in tool.Capabilities)
@@ -124,7 +125,11 @@ public sealed class McpDispatcher
                         "The game may have been updated; other tools are unaffected."));
             }
 
-            var result = await RunLocked(name, tool, args);
+            var (result, left) = await RunLocked(name, tool, args);
+            abandoned = left;
+            if (abandoned != null)
+                throw new ToolException("Interrupted by the user: the human pressed F10 and took back control. " +
+                    "Any Run in progress was stopped (status stopped_by_user); the Tool's effects may be incomplete.");
             return Ok(id, ToolResult(false, JToken.FromObject(result ?? new JObject(), Serializer).ToString(Formatting.None)));
         }
         catch (ToolException e)
@@ -138,27 +143,37 @@ public sealed class McpDispatcher
         }
         finally
         {
-            toolGate.Release();
+            // An abandoned Tool may still be touching the game, so the next call waits for it.
+            if (abandoned == null) toolGate.Release();
+            else _ = abandoned.ContinueWith(_ => toolGate.Release(), TaskContinuationOptions.ExecuteSynchronously);
         }
     }
 
-    /// <summary>Runs the Tool under the Input Lock. F10 abandons it (the game has released the lock by then) and stops the Run.</summary>
-    async Task<object?> RunLocked(string name, Tool tool, JObject args)
+    /// <summary>
+    /// Runs the Tool under the Input Lock. F10 cancels it, stops the Run and abandons it (the game has released the lock
+    /// by then); the returned task completes once the abandoned work has stopped.
+    /// </summary>
+    async Task<(object? Result, Task? Abandoned)> RunLocked(string name, Tool tool, JObject args)
     {
+        var cancel = new CancellationTokenSource();
         var takeover = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnTakeover() => takeover.TrySetResult(true);
+        void OnTakeover()
+        {
+            takeover.TrySetResult(true);
+            cancel.Cancel();
+        }
         game.UserTookOver += OnTakeover;
         try
         {
             await game.SetInputLock(name);
-            var work = Work();
-            if (await Task.WhenAny(work, takeover.Task) == work) return await work;
+            var work = Work(cancel.Token);
+            await Task.WhenAny(work, takeover.Task);
+            if (!takeover.Task.IsCompleted) return (await work, null);
 
-            _ = work.ContinueWith(t => log($"Tool '{name}' failed after the user interrupted it: {t.Exception}"),
-                TaskContinuationOptions.OnlyOnFaulted);
-            await game.StopRun();
-            throw new ToolException("Interrupted by the user: the human pressed F10 and took back control. " +
-                "Any Run in progress was stopped (status stopped_by_user); the Tool's effects may be incomplete.");
+            var settled = Settle(work);
+            try { await game.StopRun(); }
+            catch (Exception e) { log($"Stopping the Run after the user interrupted '{name}' failed: {e}"); }
+            return (null, settled);
         }
         finally
         {
@@ -166,10 +181,17 @@ public sealed class McpDispatcher
             await game.SetInputLock(null);
         }
 
-        async Task<object?> Work()
+        async Task<object?> Work(CancellationToken token)
         {
-            await Readiness.Ensure(game);
-            return await tool.Handler(args);
+            await Readiness.Ensure(game, token);
+            return await tool.Handler(args, token);
+        }
+
+        async Task Settle(Task work)
+        {
+            try { await work; }
+            catch (OperationCanceledException) { }
+            catch (Exception e) { log($"Tool '{name}' failed after the user interrupted it: {e}"); }
         }
     }
 

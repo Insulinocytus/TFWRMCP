@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Core.Platform;
 using HarmonyLib;
@@ -13,7 +14,8 @@ namespace TFWRMCP.Mod;
 /// <summary>Implements the Game seam against the live game. All game access happens on the Unity main thread.</summary>
 public sealed partial class GameAdapter : IGame
 {
-    const BindingFlags NonPublic = BindingFlags.Instance | BindingFlags.NonPublic;
+    const BindingFlags AnyMember = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
+    const string SceneLoading = "The game scene is loading; try again shortly.";
 
     readonly Dictionary<string, string> unavailable = new();
     FieldInfo? simField;
@@ -25,68 +27,72 @@ public sealed partial class GameAdapter : IGame
     FieldInfo? parseExceptionField;
     FieldInfo? spawnOffsetField;
     readonly Harmony harmony = new("com.insulinocytus.tfwrmcp");
+    readonly Action<string> info;
 
     public event Action<RunEvent> RunEvents = delegate { };
 
-    /// <summary>Resolves every reflection target up front; failures are logged and degrade only the dependent Tools.</summary>
-    public GameAdapter(Action<string> warn, InputLock inputLock)
+    /// <summary>
+    /// Resolves every reflection target up front, by type name so that a renamed game type degrades only the dependent
+    /// Tools instead of failing the Mod's startup; failures are logged.
+    /// </summary>
+    public GameAdapter(Action<string> warn, Action<string> info, InputLock inputLock)
     {
+        this.info = info;
         this.inputLock = inputLock;
-        simField = Resolve(Capabilities.State, typeof(MainSim).GetField("sim", NonPublic), "MainSim.sim", warn);
-        lockField = Resolve(Capabilities.State, typeof(MainSim).GetField("lockSimulation", NonPublic), "MainSim.lockSimulation", warn);
+        simField = Resolve(Capabilities.State, Field("MainSim", "sim"), "MainSim.sim", warn);
+        lockField = Resolve(Capabilities.State, Field("MainSim", "lockSimulation"), "MainSim.lockSimulation", warn);
 
-        const BindingFlags Public = BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance;
-        foreach (var (type, name) in new[]
-                 {
-                     (typeof(Saver), "Save"), (typeof(Saver), "WaitForPendingSaves"), (typeof(Saver), "StopFileWatcher"),
-                     (typeof(Saver), "CreateNewSaveGame"), (typeof(Saver), "IsValidSaveName"),
-                     (typeof(SaveChooser), "GenerateUnusedSaveName"), (typeof(Menu), "LoadSave"), (typeof(Menu), "Play"),
-                 })
-            Resolve(Capabilities.Saves, type.GetMethod(name, Public), $"{type.Name}.{name}", warn);
+        ResolveMethods(Capabilities.Saves, warn,
+            ("Saver", "Save"), ("Saver", "WaitForPendingSaves"), ("Saver", "StopFileWatcher"), ("Saver", "CreateNewSaveGame"),
+            ("Saver", "IsValidSaveName"), ("SaveChooser", "GenerateUnusedSaveName"), ("Menu", "LoadSave"));
+        ResolveMethods(Capabilities.TitleMenu, warn, ("Menu", "Play"));
 
         InstallScriptAndRunSupport(warn);
         ResolveUnlockDocs(warn);
     }
 
-    static MethodInfo? Method(Type type, string name) =>
-        type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
-            .FirstOrDefault(m => m.Name == name);
+    // Overload-safe: the first method of that name, which is enough to tell that it exists.
+    static MethodInfo? Method(Type? type, string name) => type?.GetMethods(AnyMember).FirstOrDefault(m => m.Name == name);
+
+    static MethodInfo? Method(string type, string name) => Method(AccessTools.TypeByName(type), name);
+
+    static FieldInfo? Field(string type, string name) => AccessTools.TypeByName(type)?.GetField(name, AnyMember);
+
+    static string ActiveSave() => OptionHolder.GetString("activeSave", "Save0");
+
+    void ResolveMethods(string capability, Action<string> warn, params (string Type, string Name)[] targets)
+    {
+        foreach (var (type, name) in targets) Resolve(capability, Method(type, name), $"{type}.{name}", warn);
+    }
 
     void InstallScriptAndRunSupport(Action<string> warn)
     {
-        spawnOffsetField = Resolve(Capabilities.Scripts, typeof(Workspace).GetField("spawnWindowOffset", NonPublic), "Workspace.spawnWindowOffset", warn);
-        foreach (var (type, name) in new[]
-                 {
-                     (typeof(Saver), "SaveCode"), (typeof(Saver), "IsValidCodeFileName"), (typeof(Workspace), "OpenCodeWindow"),
-                     (typeof(Workspace), "IsValidFileName"), (typeof(CodeWindow), "ApplyExternalCode"), (typeof(Window), "Close"),
-                 })
-            Resolve(Capabilities.Scripts, Method(type, name), $"{type.Name}.{name}", warn);
+        spawnOffsetField = Resolve(Capabilities.Scripts, Field("Workspace", "spawnWindowOffset"), "Workspace.spawnWindowOffset", warn);
+        ResolveMethods(Capabilities.Scripts, warn,
+            ("Saver", "SaveCode"), ("Saver", "IsValidCodeFileName"), ("Workspace", "OpenCodeWindow"),
+            ("Workspace", "IsValidFileName"), ("CodeWindow", "ApplyExternalCode"), ("Window", "Close"));
 
-        parseExceptionField = Resolve(Capabilities.Run, typeof(CodeWindow).GetField("parseException", NonPublic), "CodeWindow.parseException", warn);
-        Resolve(Capabilities.Run, Method(typeof(CodeWindow), "PressExecuteOrStop"), "CodeWindow.PressExecuteOrStop", warn);
-        if (simField == null)
-        {
-            Fail(Capabilities.Run, "MainSim.sim not found", warn);
-            return;
-        }
+        parseExceptionField = Resolve(Capabilities.Run, Field("CodeWindow", "parseException"), "CodeWindow.parseException", warn);
+        ResolveMethods(Capabilities.Run, warn, ("CodeWindow", "PressExecuteOrStop"));
 
-        RunHooks.Configure(e => RunEvents(e), warn, simField);
-        Patch("Logger.WriteLog", typeof(global::Logger), "WriteLog", warn, prefix: nameof(RunHooks.WriteLog));
-        Patch("Logger.LogError", typeof(global::Logger), "LogError", warn, prefix: nameof(RunHooks.LogError));
-        Patch("MainSim.StartMainExecution", typeof(MainSim), "StartMainExecution", warn, prefix: nameof(RunHooks.StartMainExecution));
-        Patch("MainSim.StopMainExecution", typeof(MainSim), "StopMainExecution", warn, prefix: nameof(RunHooks.StopMainExecution));
-        Patch("Simulation.StopProgramExecution", typeof(Simulation), "StopProgramExecution", warn, prefix: nameof(RunHooks.StopProgramExecution));
-        Patch("MainSim.StartLeaderboard", typeof(MainSim), "StartLeaderboard", warn,
+        RunHooks.Configure(e => RunEvents(e), warn);
+        Patch("Logger", "WriteLog", warn, prefix: nameof(RunHooks.WriteLog));
+        Patch("Logger", "LogError", warn, prefix: nameof(RunHooks.LogError));
+        Patch("MainSim", "StartMainExecution", warn, prefix: nameof(RunHooks.StartMainExecution));
+        Patch("MainSim", "StopMainExecution", warn, prefix: nameof(RunHooks.StopMainExecution));
+        Patch("Simulation", "StopProgramExecution", warn, prefix: nameof(RunHooks.StopProgramExecution));
+        Patch("MainSim", "StartLeaderboard", warn,
             prefix: nameof(RunHooks.StartLeaderboardBegin), finalizer: nameof(RunHooks.StartLeaderboardEnd));
-        Patch("LeaderboardManager.StopLeaderboardRun", typeof(LeaderboardManager), "StopLeaderboardRun", warn, prefix: nameof(RunHooks.StopLeaderboardRun));
-        Patch("Leaderboard.OnPlayerLoaded", typeof(Leaderboard), "OnPlayerLoaded", warn, postfix: nameof(RunHooks.PlayerLoaded));
+        Patch("LeaderboardManager", "StopLeaderboardRun", warn, prefix: nameof(RunHooks.StopLeaderboardRun));
+        Patch("Leaderboard", "OnPlayerLoaded", warn, postfix: nameof(RunHooks.PlayerLoaded));
     }
 
-    void Patch(string what, Type type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null)
+    void Patch(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null)
     {
+        var what = $"{type}.{method}";
         var target = Resolve(Capabilities.Run, Method(type, method), what, warn);
         if (target == null) return;
-        HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(typeof(RunHooks).GetMethod(name));
+        HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(Method(typeof(RunHooks), name));
         try
         {
             harmony.Patch(target, prefix: Hook(prefix), postfix: Hook(postfix), finalizer: Hook(finalizer));
@@ -128,13 +134,13 @@ public sealed partial class GameAdapter : IGame
 
     public Task CloseTitleMenu() => MainThread.Run(() =>
     {
-        UnityEngine.Debug.Log("TFWRMCP: closing the title menu");
+        info("closing the title menu");
         MainSim.Inst.menu.Play();
     });
 
     public Task<SaveList> ListSaves() => MainThread.Run(() =>
     {
-        var list = new SaveList { Current = OptionHolder.GetString("activeSave", "Save0") };
+        var list = new SaveList { Current = ActiveSave() };
         var root = Helper.persistentDataPath + "/Saves";
         if (Directory.Exists(root))
             list.Saves.AddRange(Directory.GetDirectories(root).Select(d => new DirectoryInfo(d).Name)
@@ -154,8 +160,9 @@ public sealed partial class GameAdapter : IGame
             throw new ToolException("Saving the game failed; see the game's save failure notice.");
     }
 
-    public async Task LoadSave(string name)
+    public async Task LoadSave(string name, CancellationToken cancel)
     {
+        cancel.ThrowIfCancellationRequested();
         await MainThread.Run(() => Saver.WaitForPendingSaves()).Unwrap();
         await SaveGame();
 
@@ -166,7 +173,7 @@ public sealed partial class GameAdapter : IGame
             Saver.StopFileWatcher();
             MainSim.Inst.menu.LoadSave(name);
             SceneManager.LoadScene(0);
-        });
+        }, cancel);
     }
 
     public Task<List<string>> ListScripts() => MainThread.Run(() =>
@@ -228,7 +235,7 @@ public sealed partial class GameAdapter : IGame
             throw new ToolException("Writing the Scripts to disk failed; see the game's save failure notice.");
     }
 
-    public Task<SyntaxError?> StartRun(string name) => MainThread.Run(() =>
+    public Task<SyntaxError?> StartRun(string name, CancellationToken cancel) => MainThread.Run(() =>
     {
         var window = FindScript(name);
         var main = MainSim.Inst;
@@ -240,8 +247,8 @@ public sealed partial class GameAdapter : IGame
 
         if (parseExceptionField!.GetValue(window) is not ParseException error)
             throw new ToolException($"The game did not start the Run of '{name}'.");
-        return new SyntaxError { Message = RunHooks.Plain(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
-    });
+        return new SyntaxError { Message = CodeUtilities.RemoveSyntaxTags(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
+    }, cancel);
 
     public Task StopRun() => MainThread.Run(() =>
     {
@@ -250,9 +257,8 @@ public sealed partial class GameAdapter : IGame
 
     GameState ReadState()
     {
-        // Unity null semantics: a destroyed MainSim compares equal to null but is not a null reference.
         var main = MainSim.Inst;
-        if (main == null) throw new ToolException("The game scene is loading; try again shortly.");
+        if (main == null) throw new ToolException(SceneLoading);
         var sim = (Simulation?)simField!.GetValue(main);
         if (sim == null) throw new ToolException("No Save is loaded yet; try again shortly.");
 
@@ -263,7 +269,7 @@ public sealed partial class GameAdapter : IGame
             var size = grid.WorldSize;
             var state = new GameState
             {
-                Save = OptionHolder.GetString("activeSave", "Save0"),
+                Save = ActiveSave(),
                 Inventory = Items(main.GetInventory(), includeZero: true),
                 WorldSize = new Vec2 { X = size.x, Y = size.y },
             };

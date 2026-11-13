@@ -8,13 +8,13 @@ namespace TFWRMCP.Core.Tests;
 public class InputLockTests
 {
     static Tool Probe(FakeGame game) => new("probe", "Reports the lock.", new JObject { ["type"] = "object" },
-        _ => Task.FromResult<object?>(new { locked_by = game.LockedBy }));
+        (_, _) => Task.FromResult<object?>(new { locked_by = game.LockedBy }));
 
     static Tool Failing() => new("failing", "Always fails.", new JObject { ["type"] = "object" },
-        _ => throw new ToolException("nope"));
+        (_, _) => throw new ToolException("nope"));
 
     static Tool Crashing() => new("crashing", "Always crashes.", new JObject { ["type"] = "object" },
-        _ => throw new InvalidOperationException("kaput"));
+        (_, _) => throw new InvalidOperationException("kaput"));
 
     static async Task<JObject> Ok(TestServer s, string tool, JObject? args = null)
     {
@@ -125,7 +125,7 @@ public class InputLockTests
     public async Task F10_during_any_Tool_stops_a_Run_that_an_earlier_call_left_running()
     {
         var game = GameWithNeverEndingScript();
-        game.GetStateDelay = TimeSpan.FromSeconds(30);
+        game.GetStateBlocker = new TaskCompletionSource<bool>();
         using var s = new TestServer(game);
         await Ok(s, "run_script", new JObject { ["name"] = "main", ["timeout_seconds"] = 0.05 });
         Assert.True(game.RunActive);
@@ -138,7 +138,7 @@ public class InputLockTests
         Assert.True(isError);
         Assert.Contains("interrupted by the user", text, StringComparison.OrdinalIgnoreCase);
         Assert.False(game.RunActive);
-        game.GetStateDelay = TimeSpan.Zero;
+        game.GetStateBlocker.SetResult(true);
         var state = await Ok(s, "get_state");
         Assert.Equal("stopped_by_user", (string)state["run"]!["status"]!);
     }
@@ -146,18 +146,82 @@ public class InputLockTests
     [Fact]
     public async Task The_next_Tool_call_works_and_locks_again_after_an_interruption()
     {
-        var game = new FakeGame { GetStateDelay = TimeSpan.FromSeconds(30) };
+        var game = new FakeGame { GetStateBlocker = new TaskCompletionSource<bool>() };
         using var s = new TestServer(game);
         var interrupted = s.Call("get_state");
         await game.WaitForLock("get_state");
         game.PressF10();
         await interrupted;
-        game.GetStateDelay = TimeSpan.Zero;
+        game.GetStateBlocker.SetResult(true);
         game.LockEvents.Clear();
 
         var state = await Ok(s, "get_state");
 
         Assert.Equal("Save0", (string)state["save"]!);
         Assert.Equal(new[] { "lock:get_state", "unlock" }, game.LockEvents);
+    }
+
+    [Fact]
+    public async Task F10_while_the_Tool_waits_for_the_game_stops_it_before_it_starts_a_Run()
+    {
+        var game = GameWithNeverEndingScript();
+        game.Scene = GameScene.Loading;
+        game.LoadingPolls = int.MaxValue;
+        using var s = new TestServer(game);
+
+        var call = s.Call("run_script", new JObject { ["name"] = "main", ["timeout_seconds"] = 60 });
+        await game.WaitForLock("run_script");
+        game.PressF10();
+        var (isError, _) = await call;
+        game.Scene = GameScene.Playing;
+        await Task.Delay(300);
+
+        Assert.True(isError);
+        Assert.False(game.RunActive);
+    }
+
+    [Fact]
+    public async Task F10_during_a_reload_wait_stops_the_Tool_polling_the_game()
+    {
+        var game = new FakeGame { ReloadPolls = int.MaxValue };
+        game.Saves.Add("other");
+        using var s = new TestServer(game);
+
+        var call = s.Call("load_save", new JObject { ["name"] = "other" });
+        await game.WaitForLock("load_save");
+        game.PressF10();
+        await call;
+        var polls = game.ScenePolls;
+        await Task.Delay(300);
+
+        Assert.Equal(polls, game.ScenePolls);
+    }
+
+    [Fact]
+    public async Task The_next_Tool_waits_until_the_abandoned_one_has_finished()
+    {
+        var game = new FakeGame();
+        var release = new TaskCompletionSource<bool>();
+        var slow = new Tool("slow", "Ignores everything.", new JObject { ["type"] = "object" },
+            async (_, _) =>
+            {
+                await release.Task;
+                return "done";
+            });
+        using var s = new TestServer(game, slow);
+
+        var interrupted = s.Call("slow");
+        await game.WaitForLock("slow");
+        game.PressF10();
+        await interrupted;
+        var next = s.Call("get_state");
+        var early = await Task.WhenAny(next, Task.Delay(300)) == next;
+        var callsWhileAbandonedWorkRuns = game.Calls;
+        release.SetResult(true);
+        var (isError, _) = await next;
+
+        Assert.False(early);
+        Assert.Equal(0, callsWhileAbandonedWorkRuns);
+        Assert.False(isError);
     }
 }

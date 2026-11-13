@@ -1,43 +1,20 @@
 using System;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
 namespace TFWRMCP;
 
 /// <summary>Script CRUD and Run Tools.</summary>
-public static class RunTools
+public static partial class Tools
 {
     const double DefaultTimeoutSeconds = 30;
     const double MaxTimeoutSeconds = 600;
-    static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(10);
 
     const string TimeoutDescription =
         "How long to wait for the Run to end, in seconds (default 30, at most 600). When it is still running " +
         "afterwards the result has status 'running' and the Run keeps going in the game.";
 
-    static JObject Schema(params (string Name, string Type, string Description, bool Required)[] properties)
-    {
-        var schema = new JObject
-        {
-            ["type"] = "object",
-            ["properties"] = new JObject(),
-            ["additionalProperties"] = false,
-        };
-        var required = new JArray();
-        foreach (var (name, type, description, isRequired) in properties)
-        {
-            ((JObject)schema["properties"]!)[name] = new JObject { ["type"] = type, ["description"] = description };
-            if (isRequired) required.Add(name);
-        }
-        if (required.Count > 0) schema["required"] = required;
-        return schema;
-    }
-
-    static string String(JObject args, string name) =>
-        args[name] is JValue { Type: JTokenType.String } value ? (string)value! : throw new ToolException($"'{name}' is required and must be a string.");
-
-    static TimeSpan Timeout(JObject args)
+    static TimeSpan WaitTimeout(JObject args)
     {
         var token = args["timeout_seconds"];
         if (token == null || token.Type == JTokenType.Null) return TimeSpan.FromSeconds(DefaultTimeoutSeconds);
@@ -48,21 +25,21 @@ public static class RunTools
         return TimeSpan.FromSeconds(Math.Min(seconds, MaxTimeoutSeconds));
     }
 
-    public static IEnumerable<Tool> Create(IGame game, RunTracker runs) => new[]
+    static IEnumerable<Tool> ScriptAndRunTools(IGame game, RunTracker runs) => new[]
     {
         new Tool(
             "list_scripts",
             "Lists the names of all Scripts (code windows) in the current Save.",
             Schema(),
-            async _ => new { scripts = await game.ListScripts() },
+            async (_, _) => new { scripts = await game.ListScripts() },
             Capabilities.Scripts),
         new Tool(
             "read_script",
             "Returns the code of a Script, including Scripts written by the human.",
             Schema(("name", "string", "Script name (case-sensitive).", true)),
-            async args =>
+            async (args, _) =>
             {
-                var name = String(args, "name");
+                var name = RequiredString(args, "name");
                 return new { name, code = await game.ReadScript(name) };
             },
             Capabilities.Scripts),
@@ -72,10 +49,10 @@ public static class RunTools
             "is saved to disk. Names follow the game's rules; a name that differs from an existing window only by " +
             "case is rejected. A Script that is being run cannot be overwritten (stop the Run first).",
             Schema(("name", "string", "Script name.", true), ("code", "string", "Full source code of the Script.", true)),
-            async args =>
+            async (args, _) =>
             {
-                var name = String(args, "name");
-                var code = String(args, "code");
+                var name = RequiredString(args, "name");
+                var code = RequiredString(args, "code");
                 return new { name, created = await game.WriteScript(name, code) };
             },
             Capabilities.Scripts),
@@ -84,9 +61,9 @@ public static class RunTools
             "Deletes a Script: closes its code window and removes it from disk. A Script that is being run cannot " +
             "be deleted (stop the Run first).",
             Schema(("name", "string", "Script name (case-sensitive).", true)),
-            async args =>
+            async (args, _) =>
             {
-                var name = String(args, "name");
+                var name = RequiredString(args, "name");
                 await game.DeleteScript(name);
                 return new { deleted = name };
             },
@@ -103,12 +80,12 @@ public static class RunTools
             "is closed automatically.",
             Schema(("name", "string", "Script name (case-sensitive).", true),
                 ("timeout_seconds", "number", TimeoutDescription, false)),
-            async args =>
+            async (args, cancel) =>
             {
-                var name = String(args, "name");
-                var timeout = Timeout(args);
-                var syntaxError = await game.StartRun(name);
-                if (syntaxError == null) return await runs.Wait(timeout);
+                var name = RequiredString(args, "name");
+                var timeout = WaitTimeout(args);
+                var syntaxError = await game.StartRun(name, cancel);
+                if (syntaxError == null) return await runs.Wait(timeout, cancel);
                 runs.RecordSyntaxError(name, syntaxError);
                 return runs.Snapshot(withOutput: true);
             },
@@ -118,11 +95,11 @@ public static class RunTools
             "Waits again for the latest Run (see run_script) and returns it. When the Run has already ended it " +
             "returns its final result immediately.",
             Schema(("timeout_seconds", "number", TimeoutDescription, false)),
-            async args =>
+            async (args, cancel) =>
             {
-                var timeout = Timeout(args);
+                var timeout = WaitTimeout(args);
                 if (!runs.HasRun) throw new ToolException("No Run has been started yet.");
-                return await runs.Wait(timeout);
+                return await runs.Wait(timeout, cancel);
             },
             Capabilities.Run),
         new Tool(
@@ -130,7 +107,7 @@ public static class RunTools
             "Stops the Run in progress, as if the stop button was clicked, and returns it with status " +
             "stopped_by_tool. With no Run in progress it just returns the latest Run unchanged.",
             Schema(),
-            async _ => await runs.StopByTool(StopTimeout),
+            async (_, cancel) => await runs.StopByTool(StopTimeout, cancel),
             Capabilities.Run),
     };
 }

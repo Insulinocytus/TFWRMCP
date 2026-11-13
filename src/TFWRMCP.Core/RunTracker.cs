@@ -101,20 +101,14 @@ public sealed class RunTracker
 
     readonly object gate = new();
     readonly IGame game;
+    readonly Action<string> log;
     Record current = new();
 
-    public RunTracker(IGame game)
+    public RunTracker(IGame game, Action<string> log)
     {
         this.game = game;
+        this.log = log;
         game.RunEvents += OnEvent;
-    }
-
-    public bool IsRunning
-    {
-        get
-        {
-            lock (gate) return current.Status == RunStatus.Running;
-        }
     }
 
     public bool HasRun
@@ -127,6 +121,7 @@ public sealed class RunTracker
 
     void OnEvent(RunEvent e)
     {
+        var stopAfterError = false;
         lock (gate)
         {
             if (e is RunStarted started)
@@ -149,6 +144,7 @@ public sealed class RunTracker
                     break;
                 case RunErrored error:
                     current.Error = RunErrorInfo.At(error.Message, error.Stack, error.File, error.Source, error.StartIndex);
+                    stopAfterError = true;
                     break;
                 case LeaderboardFinished result:
                     current.Leaderboard = new LeaderboardOutcome
@@ -165,6 +161,15 @@ public sealed class RunTracker
                     break;
             }
         }
+
+        if (stopAfterError) _ = StopAfterError();
+    }
+
+    /// <summary>The game leaves a Run paused on a runtime error; stop it so the game is usable again and the Run ends as error.</summary>
+    async Task StopAfterError()
+    {
+        try { await game.StopRun(); }
+        catch (Exception e) { log($"Stopping the Run after a runtime error failed: {e}"); }
     }
 
     /// <summary>Records a Run that never started because its Script does not parse.</summary>
@@ -198,22 +203,23 @@ public sealed class RunTracker
         OutputDropped = withOutput ? r.Dropped : 0,
     };
 
-    /// <summary>Waits for the Run to end for at most <paramref name="timeout"/>, then reports it with its output.</summary>
-    public async Task<RunSnapshot> Wait(TimeSpan timeout)
+    /// <summary>Waits for the Run to end for at most <paramref name="timeout"/>, then reports it with its output; throws if <paramref name="cancel"/> is cancelled.</summary>
+    public async Task<RunSnapshot> Wait(TimeSpan timeout, CancellationToken cancel)
     {
         Record run;
         lock (gate) run = current;
         if (run.Status == RunStatus.Running)
         {
-            using var cancel = new CancellationTokenSource();
-            await Task.WhenAny(run.Over.Task, Task.Delay(timeout, cancel.Token));
-            cancel.Cancel();
+            using var stopWaiting = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            await Task.WhenAny(run.Over.Task, Task.Delay(timeout, stopWaiting.Token));
+            stopWaiting.Cancel();
+            cancel.ThrowIfCancellationRequested();
         }
         lock (gate) return Describe(run, withOutput: true);
     }
 
     /// <summary>Stops the Run in progress on the Agent's behalf and waits for it to end; with no Run in progress it only reports.</summary>
-    public async Task<RunSnapshot> StopByTool(TimeSpan timeout)
+    public async Task<RunSnapshot> StopByTool(TimeSpan timeout, CancellationToken cancel)
     {
         lock (gate)
         {
@@ -221,13 +227,13 @@ public sealed class RunTracker
             current.StopRequestedByTool = true;
         }
         await game.StopRun();
-        return await Wait(timeout);
+        return await Wait(timeout, cancel);
     }
 
     /// <summary>A Run cannot outlive the loaded Save: stop it, then forget it.</summary>
-    public async Task ResetForReload(TimeSpan timeout)
+    public async Task ResetForReload(TimeSpan timeout, CancellationToken cancel)
     {
-        await StopByTool(timeout);
+        await StopByTool(timeout, cancel);
         lock (gate) current = new Record();
     }
 }

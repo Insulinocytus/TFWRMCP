@@ -2,8 +2,9 @@
 """Smoke test against the real game (stdlib only).
 
 Launches the game through Steam unless MCP already answers, waits for the port, records the current Save, creates
-a test Save, runs every check on it and finally loads the original Save back (even if checks fail). Prints PASS/FAIL
-per step. Exit code is 0 only if all steps pass. Test Saves (smoke-<timestamp>) stay in the game's Saves folder.
+two throwaway Saves (smoke-<timestamp> and smoke-<timestamp>-other), runs every check on them, loads the original
+Save back at the very end (even if checks fail) and deletes the throwaway Saves. The original Save is never loaded
+mid-run; its Unlocks are read from its save.json. Prints PASS/FAIL per step. Exit code is 0 only if all steps pass.
 
 Usage: python scripts/smoke.py [--port 47821] [--startup-timeout 240] [--no-launch]
 
@@ -12,6 +13,7 @@ Later tickets append checks to CHECKS; they run on the test Save, so checks may 
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -112,7 +114,7 @@ def check_saves(mcp):
     assert not is_error and result == {"saved": True}, result
 
     # Each switch reloads the scene; the call must only return once the other Save is loaded and playable.
-    for target in (original, test):
+    for target in (mcp.other_save, test):
         is_error, result = mcp.call("load_save", name=target)
         assert not is_error and result == {"save": target}, result
         is_error, state = mcp.call("get_state")
@@ -248,9 +250,10 @@ def check_run_output_buffer(mcp):
 
 def check_grant_unlocks(mcp):
     # A fresh Save lacks print/range/simulate/leaderboards. Give the throwaway test Save the original Save's Unlocks
-    # (plus the Leaderboard) on disk: load_save writes the Save being left, so switch away, edit, load it back.
+    # (plus the Leaderboard) on disk. The original Save is only read, never loaded. A Save's file is rewritten when
+    # the game leaves it, so edit the test Save while the other throwaway Save is loaded, then load it back.
     assert os.path.isdir(SAVES_DIR), f"Saves directory not found: {SAVES_DIR}"
-    ok(mcp, "load_save", name=mcp.original_save)
+    ok(mcp, "load_save", name=mcp.other_save)
     with open(os.path.join(SAVES_DIR, mcp.original_save, "save.json"), encoding="utf-8") as f:
         unlocks = json.load(f)["unlocks"]
     path = os.path.join(SAVES_DIR, mcp.test_save, "save.json")
@@ -288,8 +291,7 @@ def check_leaderboard_run(mcp):
 
 def check_save_switch_ends_run(mcp):
     run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=1)
-    original = mcp.original_save
-    ok(mcp, "load_save", name=original)
+    ok(mcp, "load_save", name=mcp.other_save)
     assert ok(mcp, "get_state")["run"]["status"] == "idle"
     ok(mcp, "load_save", name=mcp.test_save)
     assert ok(mcp, "get_state")["run"]["status"] == "idle"
@@ -374,11 +376,13 @@ def main():
         assert not is_error, saves
         mcp.original_save = saves["current"]
         mcp.test_save = time.strftime("smoke-%Y%m%d-%H%M%S")
-        is_error, result = mcp.call("create_save", name=mcp.test_save)
-        assert not is_error and result == {"save": mcp.test_save}, result
+        mcp.other_save = mcp.test_save + "-other"
+        for name in (mcp.other_save, mcp.test_save):
+            is_error, result = mcp.call("create_save", name=name)
+            assert not is_error and result == {"save": name}, result
         is_error, state = mcp.call("get_state")
         assert not is_error and state["save"] == mcp.test_save, state
-        print(f"    original Save={mcp.original_save} test Save={mcp.test_save}")
+        print(f"    original Save={mcp.original_save} test Saves={mcp.test_save}, {mcp.other_save}")
 
     def restore_original_save(mcp):
         is_error, result = mcp.call("load_save", name=mcp.original_save)
@@ -386,11 +390,16 @@ def main():
         is_error, state = mcp.call("get_state")
         assert not is_error and state["save"] == mcp.original_save, state
 
+    def delete_test_saves(mcp):  # the original Save is loaded by now, so these are inactive
+        for name in (mcp.test_save, mcp.other_save):
+            assert name.startswith("smoke-") and name != mcp.original_save, name
+            shutil.rmtree(os.path.join(SAVES_DIR, name), ignore_errors=True)
+
     if step(setup_test_save):
         for check in CHECKS:
             step(check)
-    if hasattr(mcp, "original_save"):
-        step(restore_original_save)
+    if hasattr(mcp, "original_save") and step(restore_original_save):
+        step(delete_test_saves)
     print(f"{total - failed}/{total} steps passed")
     return 1 if failed else 0
 

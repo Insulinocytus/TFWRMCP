@@ -19,7 +19,8 @@ public sealed class RunOutput : RunEvent
 
 /// <summary>
 /// A runtime error. <paramref name="startIndex"/> is a character offset into <paramref name="source"/>, the text of
-/// <paramref name="file"/> (null when unknown). The game stops paused on it, so <see cref="RunEnded"/> follows.
+/// <paramref name="file"/> (null when unknown). The game leaves the Run paused on it; <see cref="RunTracker"/> stops it
+/// with <see cref="IGame.StopRun"/>, so <see cref="RunEnded"/> follows.
 /// </summary>
 public sealed class RunErrored : RunEvent
 {
