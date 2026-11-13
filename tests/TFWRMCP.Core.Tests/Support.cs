@@ -11,7 +11,7 @@ using TFWRMCP;
 
 namespace TFWRMCP.Core.Tests;
 
-public sealed class FakeGame : IGame
+public sealed partial class FakeGame : IGame
 {
     public GameState State { get; set; } = SampleState();
     public Dictionary<string, string> Unavailable { get; } = new();
@@ -129,7 +129,7 @@ public sealed class FakeGame : IGame
                 new TileState { Entity = null, Ground = "dirt", Depth = 2 },
             },
         },
-        Run = new RunState { Status = RunState.Running },
+        Run = new RunSnapshot { Status = RunStatus.Running },
     };
 }
 

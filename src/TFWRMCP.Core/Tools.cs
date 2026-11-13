@@ -35,24 +35,37 @@ public static class Tools
     static string RequiredString(JObject args, string name) =>
         OptionalString(args, name) ?? throw new ToolException($"'{name}' is required.");
 
-    static async Task<object?> LoadAndWait(IGame game, string name)
+    static async Task<object?> LoadAndWait(IGame game, RunTracker runs, string name)
     {
+        await runs.ResetForReload(TimeSpan.FromSeconds(10));
         await game.LoadSave(name);
         await Readiness.Ensure(game);
         return new { save = name };
     }
 
-    public static IReadOnlyList<Tool> Create(IGame game) => new[]
+    public static IReadOnlyList<Tool> Create(IGame game)
+    {
+        var runs = new RunTracker(game);
+        return Catalogue(game, runs).Concat(RunTools.Create(game, runs)).ToArray();
+    }
+
+    static Tool[] Catalogue(IGame game, RunTracker runs) => new[]
     {
         new Tool(
             "get_state",
             "Returns a snapshot of the game as the player sees it: current Save name, inventory, every Unlock " +
             "with its level and the cost of the next level (null at max level), world size, drone positions, " +
-            "whether a Run is in progress (run.status), and the grid as tiles[y][x] (x grows east, y grows " +
+            "the latest Run (run: status idle, running, finished, error, stopped_by_tool, stopped_by_user or " +
+            "parse_error, plus script, error and Leaderboard result; use wait_run for its output), and the grid as tiles[y][x] (x grows east, y grows " +
             "north). Each tile has the ground type, plus the entity type unless the tile is empty and the " +
             "depth unless it is 0.",
             NoArguments(),
-            async _ => await game.GetState(),
+            async _ =>
+            {
+                var state = await game.GetState();
+                state.Run = runs.Snapshot(withOutput: false);
+                return state;
+            },
             Capabilities.State),
         new Tool(
             "list_saves",
@@ -77,7 +90,7 @@ public static class Tools
                     throw new ToolException($"A Save named '{name}' already exists.");
 
                 await game.CreateSave(name);
-                return await LoadAndWait(game, name);
+                return await LoadAndWait(game, runs, name);
             },
             Capabilities.Saves),
         new Tool(
@@ -92,7 +105,7 @@ public static class Tools
                             saves.FirstOrDefault(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase));
                 if (match == null)
                     throw new ToolException($"No Save named '{name}'. Existing Saves: {string.Join(", ", saves)}.");
-                return await LoadAndWait(game, match);
+                return await LoadAndWait(game, runs, match);
             },
             Capabilities.Saves),
         new Tool(

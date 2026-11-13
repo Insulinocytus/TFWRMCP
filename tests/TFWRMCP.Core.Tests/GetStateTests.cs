@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -44,7 +45,7 @@ public class GetStateTests
         Assert.Equal("dirt", (string)tiles[1]![1]!["ground"]!);
         Assert.Equal(2, (int)tiles[1]![1]!["depth"]!);
 
-        Assert.Equal("running", (string)state["run"]!["status"]!);
+        Assert.Equal("idle", (string)state["run"]!["status"]!);
     }
 
     [Fact]
@@ -105,5 +106,12 @@ public class GetStateTests
         public Task CreateSave(string name) => throw new NotSupportedException();
         public Task LoadSave(string name) => throw new NotSupportedException();
         public Task SaveGame() => throw new NotSupportedException();
+        public Task<List<string>> ListScripts() => throw new NotSupportedException();
+        public Task<string> ReadScript(string name) => throw new NotSupportedException();
+        public Task<bool> WriteScript(string name, string code) => throw new NotSupportedException();
+        public Task DeleteScript(string name) => throw new NotSupportedException();
+        public Task<SyntaxError?> StartRun(string name) => throw new NotSupportedException();
+        public Task StopRun() => throw new NotSupportedException();
+        public event Action<RunEvent> RunEvents { add { } remove { } }
     }
 }

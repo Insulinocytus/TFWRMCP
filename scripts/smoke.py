@@ -139,7 +139,165 @@ def check_get_state(mcp):
     print(f"    save={state['save']} world={size['x']}x{size['y']} unlocks={len(state['unlocks'])} run={state['run']['status']}")
 
 
-CHECKS = [check_handshake, check_tools_list, check_get_state, check_saves]
+SAVES_DIR = os.path.join(
+    os.path.expanduser("~"), "AppData", "LocalLow", "TheFarmerWasReplaced", "TheFarmerWasReplaced", "Saves"
+)
+
+
+def script_on_disk(mcp, name):
+    return os.path.join(SAVES_DIR, mcp.test_save, name + ".py")
+
+
+def ok(mcp, tool, **arguments):
+    is_error, result = mcp.call(tool, **arguments)
+    assert not is_error, f"{tool}{arguments} failed: {result}"
+    return result
+
+
+def fails(mcp, tool, expect, **arguments):
+    is_error, result = mcp.call(tool, **arguments)
+    assert is_error and expect in result, f"{tool}{arguments} should fail with {expect!r}: {result}"
+
+
+def check_scripts(mcp):
+    code = "print('hello')\n"
+    assert ok(mcp, "write_script", name="smoke_a", code=code) == {"name": "smoke_a", "created": True}
+    assert "smoke_a" in ok(mcp, "list_scripts")["scripts"]
+    assert ok(mcp, "read_script", name="smoke_a")["code"] == code
+    # The window shows the new code and the file is on disk right after the call returns.
+    if os.path.isdir(SAVES_DIR):
+        with open(script_on_disk(mcp, "smoke_a"), encoding="utf-8") as f:
+            assert f.read() == code
+
+    assert ok(mcp, "write_script", name="smoke_a", code="print('v2')\n")["created"] is False
+    assert ok(mcp, "read_script", name="smoke_a")["code"] == "print('v2')\n"
+    if os.path.isdir(SAVES_DIR):
+        with open(script_on_disk(mcp, "smoke_a"), encoding="utf-8") as f:
+            assert f.read() == "print('v2')\n"
+
+    fails(mcp, "write_script", "Invalid Script name", name="bad/name", code="")
+    fails(mcp, "write_script", "Invalid Script name", name="__builtins__", code="")
+    fails(mcp, "write_script", "clashes", name="SMOKE_A", code="")  # same name, different case
+    fails(mcp, "read_script", "No Script named", name="SMOKE_A")
+    fails(mcp, "delete_script", "No Script named", name="nope")
+    assert "SMOKE_A" not in ok(mcp, "list_scripts")["scripts"]
+
+    ok(mcp, "delete_script", name="smoke_a")
+    assert "smoke_a" not in ok(mcp, "list_scripts")["scripts"]
+    if os.path.isdir(SAVES_DIR):
+        assert not os.path.exists(script_on_disk(mcp, "smoke_a")), "deleted Script is still on disk"
+
+
+def run_wait(mcp, name, code, timeout=60):
+    ok(mcp, "write_script", name=name, code=code)
+    return ok(mcp, "run_script", name=name, timeout_seconds=timeout)
+
+
+def check_run_finishes(mcp):
+    run = run_wait(mcp, "smoke_run", "for i in range(3):\n    print(i)\n")
+    assert run["status"] == "finished" and run["script"] == "smoke_run", run
+    assert run["output"] == ["0", "1", "2"], run
+    state = ok(mcp, "get_state")
+    assert state["run"]["status"] == "finished" and "output" not in state["run"], state["run"]
+
+
+def check_run_timeout_wait_stop(mcp):
+    run = run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=1)
+    assert run["status"] == "running", run
+    assert ok(mcp, "get_state")["run"]["status"] == "running"
+    assert ok(mcp, "wait_run", timeout_seconds=1)["status"] == "running"
+
+    # A second Run is refused and the first keeps going.
+    ok(mcp, "write_script", name="smoke_other", code="print('x')\n")
+    fails(mcp, "run_script", "already in progress", name="smoke_other")
+    assert ok(mcp, "wait_run", timeout_seconds=0.5)["status"] == "running"
+    fails(mcp, "write_script", "being run", name="smoke_loop", code="pass\n")
+    fails(mcp, "delete_script", "being run", name="smoke_loop")
+
+    stopped = ok(mcp, "stop_run")
+    assert stopped["status"] == "stopped_by_tool", stopped
+    assert ok(mcp, "get_state")["run"]["status"] == "stopped_by_tool"
+    assert ok(mcp, "stop_run")["status"] == "stopped_by_tool"  # nothing to stop: reports the latest Run
+
+
+def check_run_parse_error(mcp):
+    run = run_wait(mcp, "smoke_syntax", "print('a')\nx = = 1\n")
+    assert run["status"] == "parse_error", run
+    assert run["error"]["line"] == 2 and run["error"]["column"] >= 1 and run["error"]["message"], run
+    assert ok(mcp, "get_state")["run"]["status"] == "parse_error"
+    # No Run was started, so the game takes the next one.
+    assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
+
+
+def check_run_runtime_error(mcp):
+    run = run_wait(mcp, "smoke_error", "print('before')\nno_such_function()\nprint('after')\n")
+    assert run["status"] == "error", run
+    assert run["error"]["line"] == 2 and run["error"]["message"] and run["error"]["stack"], run
+    assert run["output"][0] == "before" and "after" not in run["output"], run
+    # The game must not sit paused on the error: the next Run starts and ends normally.
+    assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
+    assert ok(mcp, "get_state")["run"]["status"] == "finished"
+
+
+def check_run_output_buffer(mcp):
+    run = run_wait(mcp, "smoke_many", "for i in range(1100):\n    quick_print(i)\n", timeout=120)
+    assert run["status"] == "finished", run
+    assert len(run["output"]) == 1000 and run["output"][-1] == "1099" and run["output_dropped"] == 100, (
+        len(run["output"]), run["output"][-1:], run.get("output_dropped"))
+
+
+def check_leaderboard_run(mcp):
+    if not os.path.isdir(SAVES_DIR):
+        print("    skipped: Saves directory not found")
+        return
+    # A fresh Save has no Leaderboard Unlock; give the throwaway test Save one on disk. load_save writes the Save
+    # being left, so switch away first, edit the test Save's file, then load it back.
+    ok(mcp, "load_save", name=mcp.original_save)
+    path = os.path.join(SAVES_DIR, mcp.test_save, "save.json")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["unlocks"] += [u for u in ("simulation", "leaderboard") if u not in data["unlocks"]]
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    ok(mcp, "load_save", name=mcp.test_save)
+
+    ok(mcp, "write_script", name="smoke_lb_target", code="pass\n")
+    # simulate() is not a Leaderboard Run: the Run just finishes, with no result attached.
+    sim = run_wait(mcp, "smoke_sim", "print(simulate('smoke_lb_target', {}, {}, {}, -1, 1000))\nprint('after simulate')\n")
+    assert sim["status"] == "finished" and "leaderboard" not in sim and sim["output"][-1] == "after simulate", sim
+
+    # The goal is unreachable for a Script that does nothing: the result still arrives, the Run is finished.
+    run = run_wait(mcp, "smoke_lb", "leaderboard_run(Leaderboards.Hay, 'smoke_lb_target', 1000)\n", timeout=120)
+    assert run["status"] == "finished", run
+    result = run["leaderboard"]
+    assert result["reached_goal"] is False and result["average_seconds"] >= 0 and "rank" in result, run
+    print(f"    leaderboard result: {result}")
+    # The result page was closed by the Mod: the farm is usable and the next Run starts at once.
+    assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
+
+    # Cancelling a Leaderboard Run: stopped by the tool.
+    ok(mcp, "write_script", name="smoke_lb_long", code="while True:\n    do_a_flip()\n")
+    started = run_wait(mcp, "smoke_lb2", "leaderboard_run(Leaderboards.Hay, 'smoke_lb_long', 1)\n", timeout=3)
+    assert started["status"] == "running", started
+    stopped = ok(mcp, "stop_run")
+    assert stopped["status"] == "stopped_by_tool" and stopped["leaderboard"]["reached_goal"] is False, stopped
+    assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
+
+
+def check_save_switch_ends_run(mcp):
+    run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=1)
+    original = mcp.original_save
+    ok(mcp, "load_save", name=original)
+    assert ok(mcp, "get_state")["run"]["status"] == "idle"
+    ok(mcp, "load_save", name=mcp.test_save)
+    assert ok(mcp, "get_state")["run"]["status"] == "idle"
+
+
+CHECKS = [
+    check_handshake, check_tools_list, check_get_state, check_saves, check_scripts, check_run_finishes,
+    check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
+    check_leaderboard_run, check_save_switch_ends_run,
+]
 
 
 def main():
