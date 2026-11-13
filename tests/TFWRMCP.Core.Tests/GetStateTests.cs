@@ -97,5 +97,13 @@ public class GetStateTests
     {
         public string? UnavailableReason(string capability) => null;
         public Task<GameState> GetState() => throw new ToolException("The game scene is loading.");
+        public Task<GameScene> GetScene() => Task.FromResult(GameScene.Playing);
+        public Task CloseTitleMenu() => throw new NotSupportedException();
+        public Task<SaveList> ListSaves() => throw new NotSupportedException();
+        public Task<bool> IsValidSaveName(string name) => throw new NotSupportedException();
+        public Task<string> GenerateSaveName() => throw new NotSupportedException();
+        public Task CreateSave(string name) => throw new NotSupportedException();
+        public Task LoadSave(string name) => throw new NotSupportedException();
+        public Task SaveGame() => throw new NotSupportedException();
     }
 }

@@ -20,6 +20,12 @@ public static class MainThread
         return done.Task;
     }
 
+    public static Task Run(Action work) => Run(() =>
+    {
+        work();
+        return true;
+    });
+
     public static void Drain()
     {
         while (Queue.TryDequeue(out var work)) work();

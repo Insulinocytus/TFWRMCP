@@ -23,3 +23,6 @@ error and leaves MCP disabled; the game itself runs normally. The server only li
 
 `get_state` returns the Save name, inventory, Unlock levels and next costs, world size, drone positions, every
 tile's entity and ground, and the Run status.
+
+`list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
+any tool runs, and tools called while the scene reloads wait until the game is playable again.
