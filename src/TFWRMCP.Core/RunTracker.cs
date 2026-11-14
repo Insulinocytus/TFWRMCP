@@ -247,6 +247,11 @@ public sealed class RunTracker
                         stopForFailures = true;
                     }
                     break;
+                case WarmupEnded warmup when current.Simulated:
+                    current.StartInventory = warmup.Inventory;
+                    current.StartGameSeconds = warmup.Seconds;
+                    current.Failed.Clear();
+                    break;
                 case RunOutput output:
                     current.Output.Enqueue(output.Text);
                     if (current.Output.Count > MaxOutput)
@@ -358,7 +363,7 @@ public sealed class RunTracker
                 .Select(item => (Item: item, Change: end.GetValueOrDefault(item) - r.StartInventory.GetValueOrDefault(item)))
                 .Where(c => c.Change != 0)
                 .ToDictionary(c => c.Item, c => c.Change);
-        if (!r.Simulated) snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
+        snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
         snapshot.Ticks = running ? game.RunTicks : r.EndTicks;
         snapshot.Seconds = Math.Round(r.Clock.Elapsed.TotalSeconds, 3);
         var now = !running ? r.EndGameSeconds : r.Simulated ? liveSeconds ?? 0 : game.GameSeconds;

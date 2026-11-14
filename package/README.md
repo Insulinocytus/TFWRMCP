@@ -86,20 +86,37 @@ how often `plant`, `harvest`, `move`, `swap`, `use_item`, `place`, `dig`, `push`
 `False`; `harvest()` on an unripe entity counts too, `till()` is not counted), `ticks` (game steps), `seconds`,
 `game_seconds` (on the game clock) and `rates` (`inventory_delta` per game second, absent when `game_seconds` is 0 or
 `inventory_delta` is absent).
-Actions on the temporary farm of `simulate()` and leaderboard runs do not count.
+Actions on the temporary farm of `simulate()` and leaderboard runs do not count; a simulated Run started by
+`simulate_script` counts its own (see below).
 
 `simulate_script(name, game_seconds)` runs a Script as a simulated Run on a temporary farm that starts with the
 current Save's Unlocks and items, at the game's top speed, and ends it once the temporary farm's own clock has reached
-`game_seconds` (to within one op; status `finished`). It needs the `simulation` Unlock, the same as calling
-`simulate()` in a Script, and fails while a Run is in progress unless you pass `stop_current: true`. The temporary
-farm is thrown away afterwards, so the Save is untouched, **but the real farm is completely paused for as long as the
-simulation runs**: nothing grows or accumulates there meanwhile, and `get_state` keeps returning the real farm. The
-real duration depends on your CPU, so a long `game_seconds` can take minutes; `timeout_seconds` works as in
+`warmup_seconds + game_seconds` (to within one op; status `finished`). It needs the `simulation` Unlock, the same as
+calling `simulate()` in a Script, and fails while a Run is in progress unless you pass `stop_current: true`. The
+temporary farm is thrown away afterwards, so the Save is untouched, **but the real farm is completely paused for as
+long as the simulation runs**: nothing grows or accumulates there meanwhile, and `get_state` keeps returning the real
+farm. The real duration depends on your CPU, so a long `game_seconds` can take minutes; `timeout_seconds` works as in
 `run_script`, and `wait_run` and `stop_run` apply to the simulated Run (the human can stop it on the overlay, too).
 Output is cleared when the simulation starts. The Run carries `simulated: true` (also in `wait_run` and `get_state`),
-and its summary counts the temporary farm only: `inventory_delta`, `rates` and `game_seconds` come from its items and
-clock, and it has no `failed_calls`. `wait_run` refuses `until_inventory` and `stop_when_met` for a simulated Run,
-because an inventory goal is about the real farm.
+and its summary counts the temporary farm only: `inventory_delta`, `failed_calls`, `rates` and `game_seconds` come from
+its items, calls and clock. `wait_run` refuses `until_inventory` and `stop_when_met` for a simulated Run, because an
+inventory goal is about the real farm. Calls the Script makes to `simulate()` itself are not counted.
+
+Parameters of `simulate_script` beyond `name`, `game_seconds`, `stop_current` and `timeout_seconds`:
+
+- `unlocks` (Unlock name to level, e.g. `{"megafarm": 3}`) and `items` (item name to amount, e.g. `{"power": 0}` or
+  `{"pumpkin": 2e7}`) override the Save's value entry by entry; whatever you do not list keeps the Save's. The game's
+  base Unlocks (grass, soil, harvest, ...) are always on the temporary farm, so setting one to 0 does not switch it
+  off. An unknown Unlock or item name, a level above the Unlock's maximum or a negative amount fails the call, and
+  nothing is started or stopped.
+- `globals` (variable name to a number, string or boolean, e.g. `{"K": 4}`) defines variables in the Script's global
+  scope before it starts, so one Script can be compared with different parameters without editing it.
+- `seed` (integer, default -1 = random) makes the simulation reproducible: the same seed, Script and parameters give
+  the same result.
+- `warmup_seconds` (default 0) lets the Script set its farm up first: the temporary farm runs `warmup_seconds`
+  before the summary starts, and `inventory_delta`, `failed_calls`, `rates` and `game_seconds` then count only the
+  `game_seconds` after the warmup (`ticks` and `output` still cover everything). While the warmup is still going a
+  running Run's summary counts from its start, and a Script that ends during the warmup has an empty summary.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.

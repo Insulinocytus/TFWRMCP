@@ -275,7 +275,7 @@ def check_grant_unlocks(mcp):
     # Everything the later Scripts use, so they pass whatever Save the smoke started from.
     grant_unlocks(mcp, {
         "debug", "costs", "simulation", "leaderboard", "dictionaries", "unlocks", "loops", "true", "expand_2",
-        "operators", "variables", "plant", "entities", "items", "senses", "watering", "timing",
+        "operators", "variables", "plant", "entities", "items", "senses", "watering", "timing", "utilities",
     })
 
 
@@ -660,7 +660,7 @@ def check_simulate_script(mcp):
     assert run["status"] == "finished" and run["simulated"] is True, run
     assert 300 - 0.01 <= run["game_seconds"] <= 300.5, run["game_seconds"]
     assert run["inventory_delta"].get("hay", 0) > 0 and run["rates"]["hay"] > 0 and run["ticks"] > 0, run
-    assert "failed_calls" not in run, run
+    assert run["failed_calls"] == {}, run
     assert ok(mcp, "get_state", fields=["run"])["run"]["simulated"] is True
     assert ok(mcp, "wait_run")["simulated"] is True
     print(f"    {run['game_seconds']} game seconds in {run['seconds']} s, inventory_delta {run['inventory_delta']}")
@@ -716,6 +716,75 @@ def check_simulate_script(mcp):
     assert "simulated" not in ok(mcp, "wait_run")
 
 
+def check_simulate_params(mcp):
+    def simulate(name, **params):
+        return ok(mcp, "simulate_script", name=name, timeout_seconds=120, **params)
+
+    def real_state(*fields):
+        return ok(mcp, "get_state", fields=list(fields))
+
+    # Every invalid parameter is refused before anything starts, and a stop_current does not stop the Run in progress.
+    ok(mcp, "write_script", name="smoke_sim_noop", code="print('ran')\n")
+    run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=0)
+    try:
+        for params, expect in (
+            ({"unlocks": {"no_such_unlock": 1}}, "no_such_unlock"), ({"unlocks": {"expand": 99}}, "expand"),
+            ({"unlocks": {"expand": -1}}, "expand"), ({"items": {"no_such_item": 1}}, "no_such_item"),
+            ({"items": {"hay": -1}}, "hay"), ({"globals": {"K": [1]}}, "K"), ({"globals": {"K": None}}, "K"),
+            ({"seed": 1.5}, "seed"), ({"warmup_seconds": -1}, "warmup_seconds"),
+        ):
+            fails(mcp, "simulate_script", expect, name="smoke_sim_noop", game_seconds=5, stop_current=True, **params)
+            assert real_state("run")["run"]["status"] == "running", params
+    finally:
+        ok(mcp, "stop_run")
+
+    # globals reach the Script, and an item override replaces only the item it names.
+    wood = real_state("inventory")["inventory"]["wood"]
+    ok(mcp, "write_script", name="smoke_sim_params", code=(
+        "print(K)\nprint(MODE)\nprint(FLAG)\nprint(num_items(Items.Hay))\nprint(num_items(Items.Wood))\n"))
+    run = simulate("smoke_sim_params", game_seconds=5, globals={"K": 4, "MODE": "fast", "FLAG": True}, items={"hay": 777})
+    assert run["status"] == "finished" and run["output"] == ["4", "fast", "True", "777", str(int(wood))], run
+
+    # An Unlock override replaces the Save's level: the temporary farm's world follows expand.
+    ok(mcp, "write_script", name="smoke_sim_size", code="print(get_world_size())\n")
+    sizes = {level: simulate("smoke_sim_size", game_seconds=5, unlocks={"expand": level})["output"][0] for level in (1, 3)}
+    default = simulate("smoke_sim_size", game_seconds=5)["output"][0]
+    real = real_state("world_size")["world_size"]
+    assert sizes[1] != sizes[3] and default == str(real["x"]), (sizes, default, real)
+
+    # The same seed gives the same simulation.
+    ok(mcp, "write_script", name="smoke_sim_seed", code=(
+        "for i in range(50):\n    plant(Entities.Bush)\n    print(random())\n    harvest()\n"))
+    first = simulate("smoke_sim_seed", game_seconds=5, seed=42)
+    again = simulate("smoke_sim_seed", game_seconds=5, seed=42)
+    other = simulate("smoke_sim_seed", game_seconds=5, seed=43)
+    assert first["status"] == "finished" and first["output"] == again["output"] and first["output"] != other["output"], (first, again, other)
+
+    # The warmup is not counted: failures and items of the first seconds are in neither summary, and game_seconds
+    # is the part after it. Without a warmup the same failures show.
+    ok(mcp, "write_script", name="smoke_sim_warm", code=(
+        "for i in range(20):\n    plant(Entities.Bush)\nwhile True:\n    if can_harvest():\n        harvest()\n"))
+    cold = simulate("smoke_sim_warm", game_seconds=200, seed=1)
+    assert cold["failed_calls"].get("plant", 0) >= 19, cold
+    warm = simulate("smoke_sim_warm", game_seconds=200, warmup_seconds=100, seed=1)
+    assert warm["status"] == "finished" and warm["simulated"] is True and warm["failed_calls"].get("plant", 0) == 0, warm
+    assert 200 - 0.01 <= warm["game_seconds"] <= 200.5, warm
+    head = simulate("smoke_sim_warm", game_seconds=100, seed=1)
+    whole = simulate("smoke_sim_warm", game_seconds=300, seed=1)
+    for item, amount in warm["inventory_delta"].items():
+        expected = whole["inventory_delta"].get(item, 0) - head["inventory_delta"].get(item, 0)
+        assert abs(amount - expected) <= 0.05 * abs(expected) + 1, (item, amount, expected)
+    assert warm["inventory_delta"].get("hay", 0) > 0, warm
+    assert all(abs(warm["rates"][k] - v / warm["game_seconds"]) < 1e-9 for k, v in warm["inventory_delta"].items()), warm
+    print(f"    warmup: delta {warm['inventory_delta']} over {warm['game_seconds']} game seconds; whole - head: "
+          f"{whole['inventory_delta'].get('hay')} - {head['inventory_delta'].get('hay')}")
+
+    # A Script that ends during the warmup has nothing to report; an items override applies in the warmup too.
+    short = simulate("smoke_sim_noop", game_seconds=5, warmup_seconds=50, items={"hay": 5000})
+    assert short["status"] == "finished" and short["game_seconds"] == 0 and short["inventory_delta"] == {} and short["failed_calls"] == {}, short
+    assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
+
+
 # Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it more Unlocks.
 CHECKS = [
     check_handshake, check_tools_list, check_no_getting_started, check_get_state, check_saves, check_unlock_failures,
@@ -724,7 +793,7 @@ CHECKS = [
     check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
     check_leaderboard_run, check_get_state_fields, check_until_inventory, check_tile_fields, check_run_summary,
     check_stop_on_failures,
-    check_get_state_during_simulate, check_simulate_script, check_save_switch_ends_run,
+    check_get_state_during_simulate, check_simulate_script, check_simulate_params, check_save_switch_ends_run,
 ]
 
 
