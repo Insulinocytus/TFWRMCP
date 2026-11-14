@@ -98,15 +98,18 @@ public interface IGame
     Task<SyntaxError?> StartRun(string name, CancellationToken cancel);
 
     /// <summary>
-    /// Starts a simulated Run of the Script on a temporary farm with the current Save's Unlocks and items, at the game's
-    /// top speed, and ends it once the temporary farm's clock reaches <paramref name="gameSeconds"/> (to within an op),
-    /// as a normal end. The real farm is paused meanwhile and is back by the time <see cref="RunEnded"/> is raised.
-    /// Clears the game's output first. Throws a <see cref="ToolException"/> when the Script does not exist or any Run is in
-    /// progress. Returns the syntax error when the Script does not parse, otherwise null once the Run has started
-    /// (<see cref="RunStarted"/> with Simulated has been raised by then). Throws <see cref="OperationCanceledException"/>
-    /// without starting anything when <paramref name="cancel"/> is cancelled by the time the game would act.
+    /// Starts a simulated Run of the Script on a temporary farm at the game's top speed: the current Save's Unlocks and
+    /// items with <paramref name="options"/> applied on top, ended as a normal end once the temporary farm's clock
+    /// reaches <see cref="SimulationOptions.WarmupSeconds"/> + <see cref="SimulationOptions.GameSeconds"/> (to within an
+    /// op). <see cref="WarmupEnded"/> is raised when the clock first reaches the warmup, or just before
+    /// <see cref="RunEnded"/> if the Run ends sooner; never when there is no warmup. The real farm is paused meanwhile
+    /// and is back by the time <see cref="RunEnded"/> is raised. Clears the game's output first. Throws a
+    /// <see cref="ToolException"/> when the Script does not exist or any Run is in progress. Returns the syntax error
+    /// when the Script does not parse, otherwise null once the Run has started (<see cref="RunStarted"/> with Simulated
+    /// has been raised by then). Throws <see cref="OperationCanceledException"/> without starting anything when
+    /// <paramref name="cancel"/> is cancelled by the time the game would act.
     /// </summary>
-    Task<SyntaxError?> StartSimulation(string name, double gameSeconds, CancellationToken cancel);
+    Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel);
 
     /// <summary>The temporary farm of the simulated Run in progress; null when there is none.</summary>
     Task<TemporaryFarm?> ReadTemporaryFarm();
@@ -187,6 +190,30 @@ public sealed class BuiltinList
 
     /// <summary>Names not usable yet, by every Unlock that grants them.</summary>
     public Dictionary<string, List<UnlockGrant>> Locked { get; } = new();
+}
+
+/// <summary>
+/// What a simulated Run starts with. Names in <see cref="Unlocks"/> and <see cref="Items"/> are already checked against
+/// the Save's Unlocks and items, levels against the Unlock's maximum; each entry replaces the Save's value and the
+/// rest is the Save's as it is.
+/// </summary>
+public sealed class SimulationOptions
+{
+    public double GameSeconds { get; set; }
+
+    /// <summary>Game seconds the temporary farm runs before the summary starts counting; 0 for none.</summary>
+    public double WarmupSeconds { get; set; }
+
+    /// <summary>Unlock name to Unlock level; 0 removes the Save's level.</summary>
+    public Dictionary<string, int> Unlocks { get; set; } = new();
+
+    public Dictionary<string, double> Items { get; set; } = new();
+
+    /// <summary>Variable name to its value in the Script's global scope: a double, a string or a bool.</summary>
+    public Dictionary<string, object> Globals { get; set; } = new();
+
+    /// <summary>The temporary farm's random seed; negative for a random one, as in the game.</summary>
+    public int Seed { get; set; } = -1;
 }
 
 /// <summary>A temporary farm as it is right now: its whole inventory and its game clock in seconds.</summary>

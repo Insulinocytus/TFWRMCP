@@ -89,8 +89,8 @@ public sealed partial class FakeGame
         return Task.CompletedTask;
     }
 
-    /// <summary>The simulated Runs started so far: Script name and requested game seconds.</summary>
-    public List<(string Name, double GameSeconds)> Simulations { get; } = new();
+    /// <summary>The simulated Runs started so far: Script name and what was asked for.</summary>
+    public List<(string Name, SimulationOptions Options)> Simulations { get; } = new();
 
     /// <summary>Runs synchronously inside StartSimulation once the Run has started.</summary>
     public Action<string>? OnStartSimulation { get; set; }
@@ -102,13 +102,13 @@ public sealed partial class FakeGame
 
     bool simulating;
 
-    public Task<SyntaxError?> StartSimulation(string name, double gameSeconds, CancellationToken cancel)
+    public Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel)
     {
         cancel.ThrowIfCancellationRequested();
         if (!Scripts.ContainsKey(name)) throw new ToolException($"No Script named '{name}'.");
         if (RunActive) throw new ToolException("A Run is already in progress.");
         if (SyntaxErrors.TryGetValue(name, out var error)) return Task.FromResult<SyntaxError?>(error);
-        Simulations.Add((name, gameSeconds));
+        Simulations.Add((name, options));
         Emit(new RunStarted(name, new Dictionary<string, double>(TemporaryInventory), simulated: true));
         OnStartSimulation?.Invoke(name);
         return Task.FromResult<SyntaxError?>(null);

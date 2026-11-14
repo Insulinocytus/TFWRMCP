@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace TFWRMCP;
 
-/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionCalled/Errored/LeaderboardFinished in any order, Ended.</summary>
+/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionCalled/WarmupEnded/Errored/LeaderboardFinished in any order, Ended.</summary>
 public abstract class RunEvent { }
 
 /// <summary>
@@ -30,7 +30,7 @@ public sealed class RunStarted : RunEvent
 /// The Script called an action (plant, harvest, move, swap, use_item, place, dig, push, unlock or hover), one event per
 /// call. <paramref name="failed"/> is set when it returned False, or was harvest() on an entity that is not harvestable
 /// (the game then returns True, clears the crop and yields nothing). Actions on the temporary farm of simulate() and
-/// Leaderboard Runs are never reported.
+/// Leaderboard Runs are never reported; those of a simulated Run started by <see cref="IGame.StartSimulation"/> are.
 /// </summary>
 public sealed class ActionCalled : RunEvent
 {
@@ -40,6 +40,22 @@ public sealed class ActionCalled : RunEvent
     {
         Function = function;
         Failed = failed;
+    }
+}
+
+/// <summary>
+/// The warmup of a simulated Run is over: <see cref="Inventory"/> and <see cref="Seconds"/> are the temporary farm's
+/// whole inventory and clock at that moment. <see cref="RunTracker"/> counts the Run's summary from here on.
+/// </summary>
+public sealed class WarmupEnded : RunEvent
+{
+    public Dictionary<string, double> Inventory { get; }
+    public double Seconds { get; }
+
+    public WarmupEnded(Dictionary<string, double> inventory, double seconds)
+    {
+        Inventory = inventory;
+        Seconds = seconds;
     }
 }
 
