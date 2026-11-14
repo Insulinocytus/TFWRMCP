@@ -184,13 +184,12 @@ public static partial class Tools
     static async Task<RunSnapshot> StartAndWait(IGame game, RunTracker runs, string name, TimeSpan timeout,
         InventoryGoal? goal, CancellationToken cancel, double? stopAfterSeconds = null, FailureRule? stopOnFailures = null)
     {
-        var syntaxError = await game.StartRun(name, cancel);
+        runs.StopOnFailuresInNextRun(stopOnFailures);
+        SyntaxError? syntaxError;
+        try { syntaxError = await game.StartRun(name, cancel); }
+        finally { runs.StopOnFailuresInNextRun(null); }
         if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
-        else
-        {
-            if (stopAfterSeconds is { } seconds) runs.StopAfterGameSeconds(seconds);
-            if (stopOnFailures != null) runs.StopOnFailures(stopOnFailures);
-        }
+        else if (stopAfterSeconds is { } seconds) runs.StopAfterGameSeconds(seconds);
         return await runs.Wait(timeout, cancel, goal);
     }
 

@@ -593,7 +593,7 @@ def check_stop_on_failures(mcp):
     assert run["status"] == "running", run
     fails(mcp, "wait_run", "stop_on_failures", stop_on_failures={})
     run = ok(mcp, "wait_run", timeout_seconds=90)
-    assert run["status"] == "stopped_by_tool" and 5 <= run["failing"]["plant"] <= run["failed_calls"]["plant"], run
+    assert run["status"] == "stopped_by_tool" and 3 <= run["failing"]["plant"] <= run["failed_calls"]["plant"], run
     print(f"    failing {run['failing']} after {run['game_seconds']} game seconds")
 
     # An ignored function does not take part, and a Run that ends another way has no failing; the rule is not inherited.

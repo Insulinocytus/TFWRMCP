@@ -75,6 +75,19 @@ public class StopOnFailuresTests
     }
 
     [Fact]
+    public async Task Calls_made_while_the_Run_is_starting_count()
+    {
+        var game = GameWithScript();
+        game.OnStartRun = _ => Calls(game, "move", 10, failed: true);
+        using var s = new TestServer(game);
+
+        var started = await Start(s, Rule(minCalls: 10));
+
+        Assert.Equal("stopped_by_tool", (string)started["status"]!);
+        Assert.Equal(new JObject { ["move"] = 10 }, started["failing"]);
+    }
+
+    [Fact]
     public async Task An_empty_rule_uses_ratio_one_half_and_at_least_100_calls()
     {
         var game = GameWithScript();

@@ -168,6 +168,7 @@ public sealed class RunTracker
     readonly IGame game;
     readonly Action<string> log;
     Record current = new();
+    FailureRule? pendingRule;
 
     public RunTracker(IGame game, Action<string> log)
     {
@@ -213,7 +214,9 @@ public sealed class RunTracker
                 {
                     Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
                     StartGameSeconds = game.GameSeconds,
+                    Watch = pendingRule == null ? null : new FailureWatch(pendingRule),
                 };
+                pendingRule = null;
                 return;
             }
 
@@ -366,11 +369,13 @@ public sealed class RunTracker
         if (IsRunning(run)) _ = StopAtDeadline(run, run.StartGameSeconds + gameSeconds);
     }
 
-    /// <summary>Stops the current Run on the Agent's behalf, like <see cref="StopAfterGameSeconds"/>, as soon as a function fails <paramref name="rule"/>; dropped when the Run ends or is replaced.</summary>
-    public void StopOnFailures(FailureRule rule)
+    /// <summary>
+    /// Watches the Run that starts next on the Agent's behalf: it is stopped as soon as a function fails
+    /// <paramref name="rule"/>, counting calls from its first one. Null withdraws a rule the next Run did not take.
+    /// </summary>
+    public void StopOnFailuresInNextRun(FailureRule? rule)
     {
-        lock (gate)
-            if (current.Status == RunStatus.Running) current.Watch = new FailureWatch(rule);
+        lock (gate) pendingRule = rule;
     }
 
     async Task StopAtDeadline(Record run, double deadline)
