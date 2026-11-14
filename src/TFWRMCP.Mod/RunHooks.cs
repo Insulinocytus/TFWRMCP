@@ -85,13 +85,17 @@ public static class RunHooks
         emit(new RunErrored(CodeUtilities.RemoveSyntaxTags(__0), CodeUtilities.RemoveSyntaxTags(stack), file, source, start));
     });
 
+    /// <summary>Set on the main thread by <see cref="GameAdapter.StartRun"/> around its click: tells the Tool's Run from the human's.</summary>
+    internal static bool StartingForTool;
+
     // MainSim.StartMainExecution(CodeWindow, Node, bool), prefix: whoever starts a Run, it is tracked.
     public static void StartMainExecution(MainSim __instance, CodeWindow __0) => Safely(nameof(StartMainExecution), () =>
     {
         if (__instance.IsExecuting()) return;
         stopRequested = false;
         Volatile.Write(ref ticks, 0);
-        emit(new RunStarted(__0.GetComponent<Window>().windowName, GameAdapter.Items(__instance.GetInventory(), includeZero: true)));
+        emit(new RunStarted(__0.GetComponent<Window>().windowName, GameAdapter.Items(__instance.GetInventory(), includeZero: true),
+            startedByTool: StartingForTool));
     });
 
     // MainSim.StopMainExecution(), prefix.

@@ -17,6 +17,9 @@ public sealed partial class FakeGame
     /// <summary>Runs synchronously inside StartRun once the Run has started; use it to script the Run's events.</summary>
     public Action<string>? OnStartRun { get; set; }
 
+    /// <summary>Runs once, inside the next StartRun before it looks at whether a Run is in progress: the human got there first.</summary>
+    public Action? BeforeStartRun { get; set; }
+
     public bool RunActive { get; private set; }
     public int StopCalls { get; private set; }
 
@@ -71,9 +74,12 @@ public sealed partial class FakeGame
     {
         cancel.ThrowIfCancellationRequested();
         if (!Scripts.ContainsKey(name)) throw new ToolException($"No Script named '{name}'.");
+        var before = BeforeStartRun;
+        BeforeStartRun = null;
+        before?.Invoke();
         if (RunActive) throw new ToolException("A Run is already in progress.");
         if (SyntaxErrors.TryGetValue(name, out var error)) return Task.FromResult<SyntaxError?>(error);
-        Emit(new RunStarted(name, new Dictionary<string, double>(State.Inventory)));
+        Emit(new RunStarted(name, new Dictionary<string, double>(State.Inventory), startedByTool: true));
         OnStartRun?.Invoke(name);
         return Task.FromResult<SyntaxError?>(null);
     }

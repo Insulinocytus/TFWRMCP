@@ -182,6 +182,41 @@ public class StopOnFailuresTests
     }
 
     [Fact]
+    public async Task A_Run_the_human_starts_just_before_the_Tool_does_does_not_take_the_rule()
+    {
+        var game = GameWithScript();
+        game.BeforeStartRun = () => game.Emit(new RunStarted("main", new()));
+        using var s = new TestServer(game);
+
+        var (isError, _) = await s.Call("run_script", new JObject
+            { ["name"] = "main", ["timeout_seconds"] = 0, ["stop_on_failures"] = Rule(minCalls: 10) });
+        Calls(game, "move", 1000, failed: true);
+
+        Assert.True(isError);
+        Assert.Equal("running", (string)(await Latest(s))["status"]!);
+        Assert.Equal(0, game.StopCalls);
+    }
+
+    [Fact]
+    public async Task A_human_Run_that_came_and_went_before_the_Tool_started_its_own_leaves_the_rule_to_the_Tool()
+    {
+        var game = GameWithScript();
+        game.BeforeStartRun = () =>
+        {
+            game.Emit(new RunStarted("main", new()));
+            game.Emit(new RunEnded(RunEnd.Terminated, null, 0));
+        };
+        using var s = new TestServer(game);
+
+        await Start(s, Rule(minCalls: 10));
+        Calls(game, "move", 10, failed: true);
+
+        var run = await Latest(s);
+        Assert.Equal("stopped_by_tool", (string)run["status"]!);
+        Assert.Equal(new JObject { ["move"] = 10 }, run["failing"]);
+    }
+
+    [Fact]
     public async Task The_rule_ends_with_the_Run_and_the_next_Run_does_not_inherit_it()
     {
         var game = GameWithScript();

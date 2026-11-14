@@ -275,7 +275,9 @@ public sealed partial class GameAdapter : IGame
         if (main.IsExecuting())
             throw new ToolException("A Run is already in progress; use wait_run to wait for it or stop_run to stop it.");
 
-        window.PressExecuteOrStop();
+        RunHooks.StartingForTool = true;
+        try { window.PressExecuteOrStop(); }
+        finally { RunHooks.StartingForTool = false; }
         if (main.IsExecuting()) return null;
 
         if (parseExceptionField!.GetValue(window) is not ParseException error)

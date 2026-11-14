@@ -224,13 +224,14 @@ public sealed class RunTracker
             if (e is RunStarted started)
             {
                 current.Over.TrySetResult(true);
+                var rule = started.StartedByTool ? pendingRule : null;
                 current = new Record
                 {
                     Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
                     Simulated = started.Simulated, StartGameSeconds = started.Simulated ? 0 : game.GameSeconds,
-                    Watch = pendingRule == null ? null : new FailureWatch(pendingRule),
+                    Watch = rule == null ? null : new FailureWatch(rule),
                 };
-                pendingRule = null;
+                if (started.StartedByTool) pendingRule = null;
                 return;
             }
 
@@ -400,8 +401,8 @@ public sealed class RunTracker
     }
 
     /// <summary>
-    /// Watches the Run that starts next on the Agent's behalf: it is stopped as soon as a function fails
-    /// <paramref name="rule"/>, counting calls from its first one. Null withdraws a rule the next Run did not take.
+    /// Watches the Run the Tool starts next (<see cref="RunStarted.StartedByTool"/>; one the human starts does not take it):
+    /// it is stopped as soon as a function fails <paramref name="rule"/>, counting calls from its first one. Null withdraws a rule the next Run did not take.
     /// </summary>
     public void StopOnFailuresInNextRun(FailureRule? rule)
     {

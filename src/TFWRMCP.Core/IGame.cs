@@ -91,7 +91,7 @@ public interface IGame
     /// <summary>
     /// Same as the human clicking run on the Script's code window. Throws a <see cref="ToolException"/> when the Script
     /// does not exist or any Run is in progress. Returns the syntax error when the Script does not parse, otherwise
-    /// null once the Run has started (<see cref="RunStarted"/> has been raised by then). Throws
+    /// null once the Run has started (<see cref="RunStarted"/> with StartedByTool has been raised by then). Throws
     /// <see cref="OperationCanceledException"/> without starting anything when <paramref name="cancel"/> is cancelled
     /// by the time the game would act.
     /// </summary>

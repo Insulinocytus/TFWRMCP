@@ -8,6 +8,7 @@ public abstract class RunEvent { }
 /// <summary>
 /// A Run began, whoever started it. Output of earlier Runs is discarded. <paramref name="simulated"/> marks a simulated
 /// Run on a temporary farm (started by <see cref="IGame.StartSimulatedRun"/>): <see cref="Inventory"/> is then that farm's.
+/// <paramref name="startedByTool"/> is set for the Run <see cref="IGame.StartRun"/> starts, never for one the human started.
 /// </summary>
 public sealed class RunStarted : RunEvent
 {
@@ -18,11 +19,14 @@ public sealed class RunStarted : RunEvent
 
     public bool Simulated { get; }
 
-    public RunStarted(string script, Dictionary<string, double> inventory, bool simulated = false)
+    public bool StartedByTool { get; }
+
+    public RunStarted(string script, Dictionary<string, double> inventory, bool simulated = false, bool startedByTool = false)
     {
         Script = script;
         Inventory = inventory;
         Simulated = simulated;
+        StartedByTool = startedByTool;
     }
 }
 
