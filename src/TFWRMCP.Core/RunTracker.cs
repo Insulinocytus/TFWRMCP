@@ -67,6 +67,10 @@ public sealed class RunSnapshot
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public string? Script { get; set; }
 
+    /// <summary>True when the Run was on a temporary farm: its summary then counts that farm, and the real farm was paused meanwhile.</summary>
+    [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+    public bool Simulated { get; set; }
+
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public RunErrorInfo? Error { get; set; }
 
@@ -95,6 +99,10 @@ public sealed class RunSnapshot
     /// <summary>Function name to the number of failed calls, non-zero functions only.</summary>
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public Dictionary<string, int>? FailedCalls { get; set; }
+
+    /// <summary>Only on a Run stopped by stop_on_failures: each function that failed the rule, with its failed calls in the 10 game seconds before the stop.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, int>? Failing { get; set; }
 
     /// <summary>Game steps the Run has executed; fixed once it has ended.</summary>
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
@@ -139,19 +147,26 @@ public sealed class RunTracker
 
     sealed class Record
     {
-        public string Status = RunStatus.Idle;
+        public volatile string Status = RunStatus.Idle;
         public string? Script;
         public readonly Queue<string> Output = new();
         public int Dropped;
         public RunErrorInfo? Error;
         public LeaderboardOutcome? Leaderboard;
-        public bool StopRequestedByTool;
+        public volatile bool StopRequestedByTool;
+
+        // The simulation thread counts action calls under this lock alone, never the tracker's gate, which a Tool
+        // describing the Run holds while it copies the output. It guards Failed, Watch and Failing.
+        public readonly object CallsGate = new();
+        public FailureWatch? Watch;
+        public Dictionary<string, int>? Failing;
         public readonly TaskCompletionSource<bool> Over = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Null for Runs that never started: they have no summary.
         public Dictionary<string, double>? StartInventory;
         public Stopwatch? Clock;
         public double StartGameSeconds;
+        public bool Simulated;
         public double EndGameSeconds;
         public readonly Dictionary<string, int> Failed = new();
         public Dictionary<string, double>? EndInventory;
@@ -161,7 +176,8 @@ public sealed class RunTracker
     readonly object gate = new();
     readonly IGame game;
     readonly Action<string> log;
-    Record current = new();
+    volatile Record current = new();
+    FailureRule? pendingRule;
 
     public RunTracker(IGame game, Action<string> log)
     {
@@ -187,8 +203,23 @@ public sealed class RunTracker
         }
     }
 
+    /// <summary>Whether the latest Run was a simulated one, in progress or over.</summary>
+    public bool IsSimulated
+    {
+        get
+        {
+            lock (gate) return current.Simulated;
+        }
+    }
+
     void OnEvent(RunEvent e)
     {
+        if (e is ActionCalled called)
+        {
+            OnAction(called);
+            return;
+        }
+
         var stopAfterError = false;
         lock (gate)
         {
@@ -202,19 +233,24 @@ public sealed class RunTracker
             if (e is RunStarted started)
             {
                 current.Over.TrySetResult(true);
+                var rule = started.StartedByTool ? pendingRule : null;
                 current = new Record
                 {
                     Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
-                    StartGameSeconds = game.GameSeconds,
+                    Simulated = started.Simulated, StartGameSeconds = started.Simulated ? 0 : game.GameSeconds,
+                    Watch = rule == null ? null : new FailureWatch(rule),
                 };
+                if (started.StartedByTool) pendingRule = null;
                 return;
             }
 
             if (current.Status != RunStatus.Running) return;
             switch (e)
             {
-                case ActionFailed failed:
-                    current.Failed[failed.Function] = current.Failed.GetValueOrDefault(failed.Function) + 1;
+                case WarmupEnded warmup when current.Simulated:
+                    current.StartInventory = warmup.Inventory;
+                    current.StartGameSeconds = warmup.Seconds;
+                    lock (current.CallsGate) current.Failed.Clear();
                     break;
                 case RunOutput output:
                     current.Output.Enqueue(output.Text);
@@ -240,7 +276,7 @@ public sealed class RunTracker
                         ended.How == RunEnd.Terminated ? RunStatus.Finished :
                         current.StopRequestedByTool ? RunStatus.StoppedByTool : RunStatus.StoppedByUser;
                     current.Clock!.Stop();
-                    current.EndGameSeconds = game.GameSeconds;
+                    current.EndGameSeconds = ended.SimulatedSeconds ?? game.GameSeconds;
                     current.EndInventory = ended.Inventory;
                     current.EndTicks = ended.Ticks;
                     current.Over.TrySetResult(true);
@@ -251,11 +287,36 @@ public sealed class RunTracker
         if (stopAfterError) _ = StopAfterError();
     }
 
+    // The hot path, on the simulation thread once per action call: never waits for the gate, which a Tool describing the
+    // Run holds while it copies the output.
+    void OnAction(ActionCalled called)
+    {
+        var run = current;
+        if (run.Status != RunStatus.Running) return;
+        lock (run.CallsGate)
+        {
+            if (called.Failed) run.Failed[called.Function] = run.Failed.GetValueOrDefault(called.Function) + 1;
+            if (run.Watch is not { } watch) return;
+            var now = game.GameSeconds;
+            if (!watch.Observe(called.Function, called.Failed, now)) return;
+            run.Failing = watch.Failing(now);
+            run.Watch = null;
+            run.StopRequestedByTool = true;
+        }
+        _ = StopAfterFailures();
+    }
+
     /// <summary>The game leaves a Run paused on a runtime error; stop it so the game is usable again and the Run ends as error.</summary>
     async Task StopAfterError()
     {
         try { await game.StopRun(); }
         catch (Exception e) { log($"Stopping the Run after a runtime error failed: {e}"); }
+    }
+
+    async Task StopAfterFailures()
+    {
+        try { await game.StopRun(); }
+        catch (Exception e) { log($"Stopping the Run after failed calls failed: {e}"); }
     }
 
     /// <summary>Records a Run that never started because its Script does not parse.</summary>
@@ -282,23 +343,34 @@ public sealed class RunTracker
         return Report(run, withOutput, live);
     }
 
-    /// <summary>Describes the Run; while it is running its inventory delta needs the current inventory, which <paramref name="live"/> may already hold.</summary>
+    /// <summary>
+    /// Describes the Run; while it is running its inventory delta needs the current inventory, which <paramref name="live"/>
+    /// may already hold. A simulated Run reads its temporary farm instead, never <paramref name="live"/>.
+    /// </summary>
     async Task<RunSnapshot> Report(Record run, bool withOutput, Dictionary<string, double>? live = null)
     {
-        if (live == null && IsRunning(run)) live = await ReadInventory();
-        lock (gate) return Describe(run, withOutput, live);
+        TemporaryFarm? farm = null;
+        if (run.Simulated && IsRunning(run))
+        {
+            farm = await game.ReadTemporaryFarm();
+            live = farm?.Inventory;
+        }
+        else if (live == null && IsRunning(run)) live = await ReadInventory();
+        lock (gate) return Describe(run, withOutput, live, farm?.Seconds);
     }
 
-    RunSnapshot Describe(Record r, bool withOutput, Dictionary<string, double>? live)
+    RunSnapshot Describe(Record r, bool withOutput, Dictionary<string, double>? live, double? liveSeconds)
     {
         var snapshot = new RunSnapshot
         {
             Status = r.Status,
             Script = r.Script,
+            Simulated = r.Simulated,
             Error = r.Error,
             Leaderboard = r.Leaderboard,
             Output = withOutput ? new List<string>(r.Output) : null,
             OutputDropped = withOutput ? r.Dropped : 0,
+            Failing = r.Status == RunStatus.StoppedByTool ? r.Failing : null,
         };
         if (r.Clock == null) return snapshot;
 
@@ -309,10 +381,11 @@ public sealed class RunTracker
                 .Select(item => (Item: item, Change: end.GetValueOrDefault(item) - r.StartInventory.GetValueOrDefault(item)))
                 .Where(c => c.Change != 0)
                 .ToDictionary(c => c.Item, c => c.Change);
-        snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
+        lock (r.CallsGate) snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
         snapshot.Ticks = running ? game.RunTicks : r.EndTicks;
         snapshot.Seconds = Math.Round(r.Clock.Elapsed.TotalSeconds, 3);
-        var gameSeconds = Math.Round((running ? game.GameSeconds : r.EndGameSeconds) - r.StartGameSeconds, 3);
+        var now = !running ? r.EndGameSeconds : r.Simulated ? liveSeconds ?? 0 : game.GameSeconds;
+        var gameSeconds = Math.Round(now - r.StartGameSeconds, 3);
         snapshot.GameSeconds = gameSeconds;
         if (snapshot.InventoryDelta != null && gameSeconds > 0)
             snapshot.Rates = snapshot.InventoryDelta.ToDictionary(c => c.Key, c => c.Value / gameSeconds);
@@ -342,6 +415,15 @@ public sealed class RunTracker
         Record run;
         lock (gate) run = current;
         if (IsRunning(run)) _ = StopAtDeadline(run, run.StartGameSeconds + gameSeconds);
+    }
+
+    /// <summary>
+    /// Watches the Run the Tool starts next (<see cref="RunStarted.StartedByTool"/>; one the human starts does not take it):
+    /// it is stopped as soon as a function fails <paramref name="rule"/>, counting calls from its first one. Null withdraws a rule the next Run did not take.
+    /// </summary>
+    public void StopOnFailuresInNextRun(FailureRule? rule)
+    {
+        lock (gate) pendingRule = rule;
     }
 
     async Task StopAtDeadline(Record run, double deadline)

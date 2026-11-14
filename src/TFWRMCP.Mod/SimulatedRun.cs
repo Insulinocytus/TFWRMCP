@@ -1,0 +1,281 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace TFWRMCP.Mod;
+
+/// <summary>
+/// The simulated Run (ADR 0002): the game's own simulation-type temporary farm, started by the Mod through
+/// MainSim.ScheduleLeaderboardStart instead of by a Script's simulate(). The hooks add what simulate() never needed:
+/// the exact game_seconds cutoff on the simulation thread, and restoring the real farm even when the game's own
+/// restore (LeaderboardExecutionFinished) returns early because the Leaderboard overlay is not active.
+/// </summary>
+public static class SimulatedRun
+{
+    // MainSim.TimeFactor's upper clamp: the game's top speed.
+    const double TopSpeed = 1_000_000;
+
+    /// <summary>The simulated Run in progress: its temporary farm, the clocks its warmup and the whole Run end at and, once its Script is over, how it ended.</summary>
+    public sealed class Active
+    {
+        public Simulation Sim { get; }
+        public Duration Warmup { get; }
+        public Duration Deadline { get; }
+
+        // 1 until WarmupEnded has been raised; 0 from the start when there is no warmup.
+        int warmupPending;
+
+        // Taken when the temporary farm's Script ends, emitted once the real farm is back.
+        public volatile RunEnded? Ended;
+
+        // Whether Ended was already set when the latest MainSim.Update began.
+        public volatile bool OverBeforeUpdate;
+
+        public Active(Simulation sim, Duration warmup, Duration deadline)
+        {
+            Sim = sim;
+            Warmup = warmup;
+            Deadline = deadline;
+            warmupPending = warmup.nanoseconds > 0 ? 1 : 0;
+        }
+
+        public bool WarmingUp => Volatile.Read(ref warmupPending) == 1;
+
+        public bool TryEndWarmup() => Interlocked.Exchange(ref warmupPending, 0) == 1;
+    }
+
+    /// <summary>A scheduled start the game has not taken yet, with the MainSim it was scheduled on.</summary>
+    public sealed class Pending
+    {
+        public MainSim Main { get; }
+        public string Script { get; }
+        public double WarmupSeconds { get; }
+        public double GameSeconds { get; }
+        public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Pending(MainSim main, string script, double warmupSeconds, double gameSeconds)
+        {
+            Main = main;
+            Script = script;
+            WarmupSeconds = warmupSeconds;
+            GameSeconds = gameSeconds;
+        }
+    }
+
+    static Action<RunEvent> emit = _ => { };
+    static Action<string> log = _ => { };
+    static FieldInfo? simField;
+    static FieldInfo? lockField;
+    static FieldInfo? scheduledStartField;
+
+    // Between scheduling the start and the game's next MainSim.Update consuming it.
+    static Pending? starting;
+    static volatile Active? current;
+
+    public static Active? Current => current;
+
+    /// <summary>Whether a simulated Run is scheduled or in progress.</summary>
+    public static bool Busy => starting != null || current != null;
+
+    /// <summary>The steps the simulated Run has executed, frozen once its Script is over; null when there is none.</summary>
+    public static long? Ticks
+    {
+        get
+        {
+            var run = current;
+            if (run == null) return null;
+            return run.Ended?.Ticks ?? (long)(run.Sim.Execution?.GlobalOpCount ?? 0);
+        }
+    }
+
+    public static void Configure(Action<RunEvent> emitEvent, Action<string> logError, FieldInfo? sim, FieldInfo? simulationLock, FieldInfo? scheduledStart)
+    {
+        emit = emitEvent;
+        log = logError;
+        simField = sim;
+        lockField = simulationLock;
+        scheduledStartField = scheduledStart;
+    }
+
+    static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Records the start just scheduled on <paramref name="main"/>; the game takes it in its next MainSim.Update.</summary>
+    public static Pending Expect(MainSim main, string script, double warmupSeconds, double gameSeconds)
+    {
+        var pending = new Pending(main, script, warmupSeconds, gameSeconds);
+        starting = pending;
+        return pending;
+    }
+
+    /// <summary>
+    /// Completes once the game has started the simulated Run (RunStarted raised) and fails when it could not. If the game
+    /// does not take the start in time (a scene reload swallowed it) or <paramref name="cancel"/> fires first, the start is
+    /// withdrawn and nothing is started: on the main thread, where it cannot race the game taking it.
+    /// </summary>
+    public static async Task WaitForStart(Pending pending, CancellationToken cancel)
+    {
+        using var stopWaiting = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        var done = await Task.WhenAny(pending.Started.Task, Task.Delay(StartTimeout, stopWaiting.Token));
+        stopWaiting.Cancel();
+        if (done == pending.Started.Task || !await MainThread.Run(() => Withdraw(pending)))
+        {
+            await pending.Started.Task;
+            return;
+        }
+
+        cancel.ThrowIfCancellationRequested();
+        throw new ToolException($"The game did not start the simulated Run within {StartTimeout.TotalSeconds:0} seconds; nothing was started.");
+    }
+
+    // False when the game has taken the start meanwhile.
+    static bool Withdraw(Pending pending)
+    {
+        if (Interlocked.CompareExchange(ref starting, null, pending) != pending) return false;
+        scheduledStartField!.SetValue(pending.Main, null);
+        return true;
+    }
+
+    static Dictionary<string, double> Inventory(Simulation sim) => GameAdapter.Items(sim.farm.Items, includeZero: true);
+
+    /// <summary>The temporary farm of the simulated Run in progress as it is right now; null when there is none. Main thread only.</summary>
+    public static TemporaryFarm? Read(MainSim main)
+    {
+        var run = current;
+        if (run == null) return null;
+        lock (lockField!.GetValue(main))
+            return new TemporaryFarm(Inventory(run.Sim), run.Sim.CurrentTime.Seconds);
+    }
+
+    // MainSim.StartLeaderboard(LeaderboardStartArgs), finalizer; runs in MainSim.Update, under the simulation lock.
+    public static Exception? StartLeaderboardEnd(MainSim __instance, Exception? __exception)
+    {
+        var pending = Interlocked.Exchange(ref starting, null);
+        if (pending == null) return __exception;
+        try
+        {
+            var sim = (Simulation?)simField!.GetValue(__instance);
+            if (__exception != null || __instance.storedSim == null || sim == null)
+            {
+                pending.Started.TrySetException(new ToolException(__exception == null
+                    ? "The game did not start the simulated Run."
+                    : $"The game failed to start the simulated Run: {__exception.Message}"));
+                return __exception;
+            }
+
+            RunHooks.ConsumeEnd();
+            __instance.TimeFactor = TopSpeed;
+            current = new Active(sim, Duration.FromSeconds(pending.WarmupSeconds),
+                Duration.FromSeconds(pending.WarmupSeconds + pending.GameSeconds));
+            emit(new RunStarted(pending.Script, Inventory(sim), simulated: true));
+            pending.Started.TrySetResult(true);
+        }
+        catch (Exception e)
+        {
+            log($"Simulated Run hook {nameof(StartLeaderboardEnd)} failed: {e}");
+            pending.Started.TrySetException(e);
+        }
+        return __exception;
+    }
+
+    // Simulation.RunNextStep(Duration goalTime, object lockSimulation, bool), prefix, on the simulation thread: the temporary
+    // farm never gets a goal past the end of its warmup (until that is reported) or its deadline, and its Script is stopped
+    // as soon as the clock is at the deadline.
+    public static void BeforeStep(Simulation __instance, ref Duration __0, object __1)
+    {
+        var run = current;
+        if (run == null || !ReferenceEquals(run.Sim, __instance)) return;
+        try
+        {
+            if (run.WarmingUp)
+            {
+                if (__instance.CurrentTime >= run.Warmup) EndWarmup(run, __instance);
+                else if (__0 > run.Warmup) __0 = run.Warmup;
+            }
+            if (__0 > run.Deadline) __0 = run.Deadline;
+            if (__instance.CurrentTime < run.Deadline || !__instance.IsExecuting()) return;
+            lock (__1)
+            {
+                if (__instance.IsExecuting()) __instance.StopProgramExecution();
+            }
+        }
+        catch (Exception e)
+        {
+            log($"Simulated Run hook {nameof(BeforeStep)} failed: {e}");
+        }
+    }
+
+    static void EndWarmup(Active run, Simulation sim)
+    {
+        if (run.TryEndWarmup()) emit(new WarmupEnded(Inventory(sim), sim.CurrentTime.Seconds));
+    }
+
+    // Simulation.StopProgramExecution(), prefix: the end of the temporary farm's Script, however it came about. A Script
+    // that ends during the warmup reports the warmup over first, so its summary is empty rather than the warmup's.
+    public static void ProgramEnding(Simulation __instance)
+    {
+        var run = current;
+        if (run == null || !ReferenceEquals(run.Sim, __instance) || run.Ended != null || !__instance.IsExecuting()) return;
+        try
+        {
+            EndWarmup(run, __instance);
+            run.Ended = new RunEnded(RunHooks.ConsumeEnd(), Inventory(__instance),
+                (long)__instance.Execution.GlobalOpCount, __instance.CurrentTime.Seconds);
+        }
+        catch (Exception e)
+        {
+            log($"Simulated Run hook {nameof(ProgramEnding)} failed: {e}");
+        }
+    }
+
+    // MainSim.Update(), prefix: whether the Script was already over when this frame began. The Script can end on the
+    // simulation thread while Update runs, and the game then restores the real farm in the next one.
+    public static void BeforeUpdate()
+    {
+        var run = current;
+        if (run != null) run.OverBeforeUpdate = run.Ended != null;
+    }
+
+    // MainSim.Update(), postfix. The game restores the real farm in Update once the temporary farm's Script is over, but
+    // only while the Leaderboard overlay is active; otherwise it would stay paused behind the temporary farm forever.
+    public static void AfterUpdate(MainSim __instance)
+    {
+        var run = current;
+        if (run == null) return;
+        try
+        {
+            // A new scene's MainSim: the Run it belonged to is gone.
+            if (__instance.storedSim == null)
+            {
+                current = null;
+                return;
+            }
+            if (!run.OverBeforeUpdate) return;
+
+            log("The simulated Run is over but the game has not restored the real farm (Leaderboard overlay inactive?); restoring it.");
+            var real = __instance.storedSim;
+            lock (lockField!.GetValue(__instance))
+            {
+                __instance.leaderboardManager.RemoveOverlay();
+                __instance.RestoreMainSim();
+                real.Paused = false;
+                __instance.TimeFactor = 1;
+            }
+        }
+        catch (Exception e)
+        {
+            log($"Simulated Run hook {nameof(AfterUpdate)} failed: {e}");
+        }
+    }
+
+    // MainSim.RestoreMainSim(), postfix: the real farm is back, whichever path restored it.
+    public static void Restored(MainSim __instance)
+    {
+        var run = current;
+        if (run?.Ended is not { } ended || __instance.storedSim != null) return;
+        current = null;
+        try { emit(ended); }
+        catch (Exception e) { log($"Simulated Run hook {nameof(Restored)} failed: {e}"); }
+    }
+}

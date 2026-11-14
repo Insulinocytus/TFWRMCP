@@ -85,13 +85,17 @@ public static class RunHooks
         emit(new RunErrored(CodeUtilities.RemoveSyntaxTags(__0), CodeUtilities.RemoveSyntaxTags(stack), file, source, start));
     });
 
+    /// <summary>Set on the main thread by <see cref="GameAdapter.StartRun"/> around its click: tells the Tool's Run from the human's.</summary>
+    internal static bool StartingForTool;
+
     // MainSim.StartMainExecution(CodeWindow, Node, bool), prefix: whoever starts a Run, it is tracked.
     public static void StartMainExecution(MainSim __instance, CodeWindow __0) => Safely(nameof(StartMainExecution), () =>
     {
         if (__instance.IsExecuting()) return;
         stopRequested = false;
         Volatile.Write(ref ticks, 0);
-        emit(new RunStarted(__0.GetComponent<Window>().windowName, GameAdapter.Items(__instance.GetInventory(), includeZero: true)));
+        emit(new RunStarted(__0.GetComponent<Window>().windowName, GameAdapter.Items(__instance.GetInventory(), includeZero: true),
+            startedByTool: StartingForTool));
     });
 
     // MainSim.StopMainExecution(), prefix.
@@ -100,15 +104,21 @@ public static class RunHooks
         if (!startingLeaderboard && __instance.IsExecuting()) stopRequested = true;
     });
 
+    /// <summary>Tells a stopped Run from one that ran to its end, and clears the stop request.</summary>
+    internal static RunEnd ConsumeEnd()
+    {
+        var how = stopRequested ? RunEnd.Stopped : RunEnd.Terminated;
+        stopRequested = false;
+        return how;
+    }
+
     // Simulation.StopProgramExecution(), prefix: the end of the main simulation's Run, however it came about.
     public static void StopProgramExecution(Simulation __instance) => Safely(nameof(StopProgramExecution), () =>
     {
         if (__instance.leaderboardType != LeaderboardType.none || !__instance.IsExecuting() || !IsMainSim(__instance)) return;
         Volatile.Write(ref ticks, (long)__instance.Execution.GlobalOpCount);
         if (startingLeaderboard) return;
-        var how = stopRequested ? RunEnd.Stopped : RunEnd.Terminated;
-        stopRequested = false;
-        emit(new RunEnded(how, GameAdapter.Items(__instance.farm.Items, includeZero: true), Ticks));
+        emit(new RunEnded(ConsumeEnd(), GameAdapter.Items(__instance.farm.Items, includeZero: true), Ticks));
     });
 
     // MainSim.StartLeaderboard(LeaderboardStartArgs), prefix and finalizer.
@@ -151,41 +161,55 @@ public static class RunHooks
     /// <summary>What <see cref="ActionEnd"/> needs from before the action: it may end the Run and clear the drones' states.</summary>
     public struct ActionState
     {
-        public string? Function;
+        public ActionCalled[]? Calls;
         public ProgramState? Program;
         public bool Unharvestable;
     }
 
-    static string? ActionName(SideEffect effect)
+    // Events are immutable, so every call reuses one of these pairs (succeeded, failed) instead of allocating on the simulation thread.
+    static ActionCalled[] CallPair(string function) => new[] { new ActionCalled(function, false), new ActionCalled(function, true) };
+
+    static readonly ActionCalled[] PlantCalls = CallPair("plant");
+    static readonly ActionCalled[] HarvestCalls = CallPair("harvest");
+    static readonly ActionCalled[] MoveCalls = CallPair("move");
+    static readonly ActionCalled[] SwapCalls = CallPair("swap");
+    static readonly ActionCalled[] UseItemCalls = CallPair("use_item");
+    static readonly ActionCalled[] PlaceCalls = CallPair("place");
+    static readonly ActionCalled[] DigCalls = CallPair("dig");
+    static readonly ActionCalled[] PushCalls = CallPair("push");
+    static readonly ActionCalled[] UnlockCalls = CallPair("unlock");
+    static readonly ActionCalled[] HoverCalls = CallPair("hover");
+
+    static ActionCalled[]? ActionCalls(SideEffect effect)
     {
         switch (effect)
         {
-            case SideEffect.Plant: return "plant";
-            case SideEffect.Harvest: return "harvest";
-            case SideEffect.Move: return "move";
-            case SideEffect.Swap: return "swap";
-            case SideEffect.UseItem: return "use_item";
-            case SideEffect.Place: return "place";
-            case SideEffect.Dig: return "dig";
-            case SideEffect.Push: return "push";
-            case SideEffect.Unlock: return "unlock";
-            case SideEffect.Hover: return "hover";
+            case SideEffect.Plant: return PlantCalls;
+            case SideEffect.Harvest: return HarvestCalls;
+            case SideEffect.Move: return MoveCalls;
+            case SideEffect.Swap: return SwapCalls;
+            case SideEffect.UseItem: return UseItemCalls;
+            case SideEffect.Place: return PlaceCalls;
+            case SideEffect.Dig: return DigCalls;
+            case SideEffect.Push: return PushCalls;
+            case SideEffect.Unlock: return UnlockCalls;
+            case SideEffect.Hover: return HoverCalls;
             default: return null;
         }
     }
 
-    // Execution.ApplySideEffect(int droneId), prefix. Actions on the temporary farm of simulate() and Leaderboard Runs are not tracked.
+    // Execution.ApplySideEffect(int droneId), prefix. Of the temporary farms, only the simulated Run's own is tracked, not simulate()'s or a Leaderboard Run's.
     public static void ActionBegin(Execution __instance, int __0, out ActionState __state)
     {
         __state = default;
         try
         {
             var sim = __instance.sim;
-            if (sim.leaderboardType != LeaderboardType.none || !IsMainSim(sim)) return;
+            if (!IsMainSim(sim) || (sim.leaderboardType != LeaderboardType.none && SimulatedRun.Current?.Sim != sim)) return;
             var program = __instance.States[__0];
-            var function = ActionName(program.currentSideEffect);
-            if (function == null) return;
-            __state.Function = function;
+            var calls = ActionCalls(program.currentSideEffect);
+            if (calls == null) return;
+            __state.Calls = calls;
             __state.Program = program;
             // Harvesting something unripe returns True, so only the entity says whether it failed.
             __state.Unharvestable = program.currentSideEffect == SideEffect.Harvest && !sim.farm.drones[__0].CanHarvest();
@@ -199,10 +223,11 @@ public static class RunHooks
     // Execution.ApplySideEffect(int droneId), postfix; an action that throws a Script error never gets here.
     public static void ActionEnd(ActionState __state)
     {
-        if (__state.Function == null) return;
+        if (__state.Calls == null) return;
         try
         {
-            if (__state.Unharvestable || __state.Program!.ReturnValue is PyBool { num: 0 }) emit(new ActionFailed(__state.Function));
+            var failed = __state.Unharvestable || __state.Program!.ReturnValue is PyBool { num: 0 };
+            emit(__state.Calls[failed ? 1 : 0]);
         }
         catch (Exception e)
         {

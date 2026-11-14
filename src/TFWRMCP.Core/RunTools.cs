@@ -29,10 +29,12 @@ public static partial class Tools
         "also counts as a failed harvest, because the game then returns True, clears the crop and yields " +
         "nothing; till() has no return value and is not counted), ticks (game steps the Run has executed, the " +
         "unit of get_tick_count()), seconds (real elapsed time), game_seconds (elapsed time on the game clock " +
-        "that get_time() reads, of the real farm) and rates (item name to inventory_delta divided by " +
-        "game_seconds, the net change per game second; absent when game_seconds is 0 or inventory_delta is " +
-        "absent); ticks, seconds and game_seconds stop growing when the Run ends. Actions and items on the " +
-        "temporary farm of simulate() and Leaderboard Runs do not count; Runs started by the human do. " +
+        "that get_time() reads, of the real farm; of the temporary farm for a simulated Run) and rates (item " +
+        "name to inventory_delta divided by game_seconds, the net change per game second; absent when " +
+        "game_seconds is 0 or inventory_delta is absent); ticks, seconds and game_seconds stop growing when the " +
+        "Run ends. Actions and items on the temporary farm of simulate() and Leaderboard Runs do not count; " +
+        "Runs started by the human do; a simulated Run counts its own temporary farm's items, failed calls and " +
+        "clock, from the end of its warmup. " +
         "parse_error results have none of these. Use them to notice a Script that spins without progress, " +
         "e.g. plant() failing on occupied tiles while items are consumed.";
 
@@ -43,6 +45,31 @@ public static partial class Tools
         "dropped when the Run ends first. Combined with until_inventory and stop_when_met, whichever holds first " +
         "stops the Run. To measure production: stop_after_seconds=60, timeout_seconds=0, then wait_run until the " +
         "Run has ended and read rates.";
+
+    const string StopOnFailuresDescription =
+        "Stop the Run (like stop_run) when a function keeps failing, instead of letting a stuck Script burn game " +
+        "time. An object; pass {} for the defaults. For every function not in ignore the game clock's last 10 " +
+        "seconds (the clock get_time() reads) are checked: once it was called at least min_calls times (default " +
+        "100) in that window and more than ratio (a number in (0, 1], default 0.5) of those calls failed (a failed " +
+        "call is one that failed_calls counts), the Run is stopped. A ratio exactly reached does not stop it. " +
+        "Functions are judged separately, so a stuck move is caught even while harvest succeeds; put functions " +
+        "your Script fails on purpose in ignore (a list of function names, e.g. [\"harvest\"]). The result then " +
+        "has status stopped_by_tool and failing (function name to its failed calls in the window), listing every " +
+        "function that met the condition then; a Run that ends any other way has no failing. The rule belongs to " +
+        "the Run, not to this call: it keeps working after the call returned 'running' and ends with the Run. " +
+        "Combined with stop_after_seconds, until_inventory and stop_when_met, whichever happens first stops the " +
+        "Run. Only Runs started by this call are watched, never the human's. Not set: no rule.";
+
+    static JObject StopOnFailuresSchema() => new()
+    {
+        ["properties"] = new JObject
+        {
+            ["ratio"] = new JObject { ["type"] = "number", ["exclusiveMinimum"] = 0, ["maximum"] = 1 },
+            ["min_calls"] = new JObject { ["type"] = "integer", ["minimum"] = 1 },
+            ["ignore"] = new JObject { ["type"] = "array", ["items"] = new JObject { ["type"] = "string" } },
+        },
+        ["additionalProperties"] = false,
+    };
 
     const string UntilInventoryDescription =
         "Item name to amount, e.g. {\"carrot\": 600}: the inventory must hold at least that much of every listed " +
@@ -75,7 +102,7 @@ public static partial class Tools
         var atLeast = new Dictionary<string, double>();
         foreach (var item in items.Properties())
         {
-            if (item.Value.Type is not (JTokenType.Integer or JTokenType.Float) || (double)item.Value < 0)
+            if (!IsNumber(item.Value) || (double)item.Value < 0)
                 throw new ToolException($"'until_inventory' amount for '{item.Name}' must be a number that is not negative.");
             atLeast[item.Name] = (double)item.Value;
         }
@@ -95,7 +122,7 @@ public static partial class Tools
     {
         var token = args["timeout_seconds"];
         if (token == null || token.Type == JTokenType.Null) return TimeSpan.FromSeconds(DefaultTimeoutSeconds);
-        if (token.Type is not (JTokenType.Integer or JTokenType.Float))
+        if (!IsNumber(token))
             throw new ToolException("'timeout_seconds' must be a number.");
         var seconds = (double)token;
         if (double.IsNaN(seconds) || seconds < 0) throw new ToolException("'timeout_seconds' must not be negative.");
@@ -106,18 +133,63 @@ public static partial class Tools
     {
         var token = args["stop_after_seconds"];
         if (token == null || token.Type == JTokenType.Null) return null;
-        if (game.UnavailableReason(Capabilities.State) is { } reason)
-            throw new ToolException($"'stop_after_seconds' is unavailable: capability '{Capabilities.State}' failed to " +
-                $"resolve ({reason}).");
-        if (token.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)token > 0))
+        RequireGameClock(game, "stop_after_seconds");
+        if (!IsNumber(token) || !((double)token > 0))
             throw new ToolException("'stop_after_seconds' must be a number greater than 0.");
         return (double)token;
     }
 
-    static async Task<RunSnapshot> StartAndWait(IGame game, RunTracker runs, string name, TimeSpan timeout,
-        InventoryGoal? goal, CancellationToken cancel, double? stopAfterSeconds = null)
+    static void RequireGameClock(IGame game, string parameter)
     {
-        var syntaxError = await game.StartRun(name, cancel);
+        if (game.UnavailableReason(Capabilities.State) is { } reason)
+            throw new ToolException($"'{parameter}' is unavailable: capability '{Capabilities.State}' failed to " +
+                $"resolve ({reason}).");
+    }
+
+    static FailureRule? StopOnFailures(JObject args, IGame game)
+    {
+        var token = args["stop_on_failures"];
+        if (token == null || token.Type == JTokenType.Null) return null;
+        RequireGameClock(game, "stop_on_failures");
+        if (token is not JObject rule)
+            throw new ToolException("'stop_on_failures' must be an object: {\"ratio\": 0.5, \"min_calls\": 100, \"ignore\": [\"move\"]}.");
+        var unknown = rule.Properties().FirstOrDefault(p => p.Name is not ("ratio" or "min_calls" or "ignore"));
+        if (unknown != null)
+            throw new ToolException($"Unknown key '{unknown.Name}' in 'stop_on_failures'. Keys: ratio, min_calls, ignore.");
+
+        var ratio = 0.5;
+        if (rule["ratio"] is { Type: not JTokenType.Null } ratioToken)
+        {
+            if (!IsNumber(ratioToken) || !((double)ratioToken > 0 && (double)ratioToken <= 1))
+                throw new ToolException("'stop_on_failures.ratio' must be a number greater than 0 and at most 1.");
+            ratio = (double)ratioToken;
+        }
+
+        var minCalls = 100;
+        if (rule["min_calls"] is { Type: not JTokenType.Null } minCallsToken)
+        {
+            if (minCallsToken is not JValue { Type: JTokenType.Integer, Value: long count and >= 1 and <= int.MaxValue })
+                throw new ToolException("'stop_on_failures.min_calls' must be a positive integer.");
+            minCalls = (int)count;
+        }
+
+        var ignore = new HashSet<string>();
+        if (rule["ignore"] is { Type: not JTokenType.Null } ignoreToken)
+        {
+            if (ignoreToken is not JArray names || names.Any(n => n.Type != JTokenType.String))
+                throw new ToolException("'stop_on_failures.ignore' must be an array of function names.");
+            ignore.UnionWith(names.Select(n => (string)n!));
+        }
+        return new FailureRule(ratio, minCalls, ignore);
+    }
+
+    static async Task<RunSnapshot> StartAndWait(IGame game, RunTracker runs, string name, TimeSpan timeout,
+        InventoryGoal? goal, CancellationToken cancel, double? stopAfterSeconds = null, FailureRule? stopOnFailures = null)
+    {
+        runs.StopOnFailuresInNextRun(stopOnFailures);
+        SyntaxError? syntaxError;
+        try { syntaxError = await game.StartRun(name, cancel); }
+        finally { runs.StopOnFailuresInNextRun(null); }
         if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
         else if (stopAfterSeconds is { } seconds) runs.StopAfterGameSeconds(seconds);
         return await runs.Wait(timeout, cancel, goal);
@@ -149,15 +221,17 @@ public static partial class Tools
             "stop_current). Returns {name, created}; with stop_current and a Run in progress also stopped (the " +
             "stopped Run, as stop_run returns it); with run also run (the Run, as run_script returns it; parse_error " +
             "on a syntax error, the Script is still written). Use stop_current and run together to replace and " +
-            "rerun a running Script in one call.",
-            WaitSchema(
+            "rerun a running Script in one call. With run, stop_on_failures protects the Run as in run_script.",
+            WithSchema(WaitSchema(
                 ("name", "string", "Script name.", true),
                 ("code", "string", "Full source code of the Script.", true),
                 ("stop_current", "boolean", "Before writing, stop the Run in progress (like stop_run), whoever " +
                     "started it. Default false.", false),
                 ("run", "boolean", "After writing, run the Script (like run_script; timeout_seconds, " +
-                    "until_inventory and stop_when_met apply as there). With a Run in progress this needs " +
-                    "stop_current, otherwise the call fails and writes nothing. Default false.", false)),
+                    "until_inventory, stop_when_met and stop_on_failures apply as there). With a Run in progress this needs " +
+                    "stop_current, otherwise the call fails and writes nothing. Default false.", false),
+                ("stop_on_failures", "object", StopOnFailuresDescription + " Needs run.", false)),
+                "stop_on_failures", StopOnFailuresSchema()),
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
@@ -168,13 +242,15 @@ public static partial class Tools
                     throw new ToolException($"'stop_current' and 'run' are unavailable: capability '{Capabilities.Run}' " +
                         $"failed to resolve ({reason}).");
                 var (timeout, goal) = run ? await WaitArgs(args, game) : default;
+                var failureRule = StopOnFailures(args, game);
+                if (failureRule != null && !run) throw new ToolException("'stop_on_failures' needs 'run'.");
                 if (run && !stopCurrent && runs.InProgress)
                     throw new ToolException("A Run is in progress; pass stop_current to stop it first. Nothing was written.");
 
                 var result = new Dictionary<string, object?> { ["name"] = name };
                 if (stopCurrent && runs.InProgress) result["stopped"] = await runs.StopByTool(StopTimeout, cancel);
                 result["created"] = await game.WriteScript(name, code);
-                if (run) result["run"] = await StartAndWait(game, runs, name, timeout, goal, cancel);
+                if (run) result["run"] = await StartAndWait(game, runs, name, timeout, goal, cancel, stopOnFailures: failureRule);
                 return result;
             },
             Capabilities.Scripts),
@@ -201,29 +277,87 @@ public static partial class Tools
             "rank or null without Steam). A runtime error stops the Run automatically. The Leaderboard result page " +
             "is closed automatically. To run until the inventory reaches a target, pass until_inventory (and " +
             "stop_when_met to stop the Run then) instead of polling get_state; to run for a fixed game time, pass " +
-            "stop_after_seconds. The Run also carries a summary: " +
+            "stop_after_seconds; to stop a Run that keeps failing calls, pass stop_on_failures. The Run also carries a summary: " +
             RunSummaryDescription,
-            WaitSchema(
+            WithSchema(WaitSchema(
                 ("name", "string", "Script name (case-sensitive).", true),
-                ("stop_after_seconds", "number", StopAfterSecondsDescription, false)),
+                ("stop_after_seconds", "number", StopAfterSecondsDescription, false),
+                ("stop_on_failures", "object", StopOnFailuresDescription, false)),
+                "stop_on_failures", StopOnFailuresSchema()),
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
                 var stopAfterSeconds = StopAfterSeconds(args, game);
+                var stopOnFailures = StopOnFailures(args, game);
                 var (timeout, goal) = await WaitArgs(args, game);
-                return await StartAndWait(game, runs, name, timeout, goal, cancel, stopAfterSeconds);
+                return await StartAndWait(game, runs, name, timeout, goal, cancel, stopAfterSeconds, stopOnFailures);
             },
             Capabilities.Run),
         new Tool(
+            "simulate_script",
+            "Runs a Script as a simulated Run on a temporary farm that starts with this Save's Unlocks and items " +
+            "(each overridable with unlocks and items, entry by entry), at the game's top speed, and waits for it " +
+            "to end. The temporary farm is thrown away afterwards, so the Save, the real farm's items and the real " +
+            "farm's clock stay as they were. The real farm is completely paused for as long as the simulated Run " +
+            "runs: nothing grows or accumulates there meanwhile, so count the simulated Run's real duration (it " +
+            "depends on your CPU; a long game_seconds can take minutes) into your plan. The temporary farm always " +
+            "has the game's base Unlocks, which cannot be switched off, even by setting them to 0 in unlocks. It " +
+            "ends once its own game clock reaches warmup_seconds + game_seconds (to within one op), as a normal " +
+            "end: status finished. Needs the simulation Unlock (as simulate() in a Script does) and fails when a " +
+            "Run is already in progress unless stop_current is set. Everything is checked before anything is stopped " +
+            "or started: an invalid parameter, a Script that does not exist or one that does not parse stops nothing, " +
+            "even with stop_current (a syntax error then fails the call instead of giving parse_error, which would " +
+            "replace the Run in progress as the latest Run). The output is " +
+            "cleared when the simulated Run starts. Returns the Run as run_script does, with simulated: true (also in " +
+            "wait_run and get_state): status, output, error (parse_error for a syntax error without starting " +
+            "anything; a runtime error stops the simulated Run and gives status error), and the summary, which counts " +
+            "the temporary farm only, after the warmup, with failed_calls from the temporary farm (calls to " +
+            "simulate() inside the Script are not counted): " + RunSummaryDescription +
+            " wait_run, stop_run (back to the real farm at once) and the human's stop button apply to it; wait_run " +
+            "refuses until_inventory and stop_when_met for a simulated Run.",
+            SimulateSchema(),
+            async (args, cancel) =>
+            {
+                var name = RequiredString(args, "name");
+                var stopCurrent = OptionalBool(args, "stop_current");
+                var timeout = WaitTimeout(args);
+
+                var state = await game.GetState(StateParts.Unlocks | StateParts.Inventory);
+                var options = SimulatedRunOptionsFrom(args, state);
+                if ((state.Unlocks.FirstOrDefault(u => u.Name == "simulation")?.Level ?? 0) < 1)
+                    throw new ToolException("simulate_script needs the 'simulation' Unlock, which this Save has not bought " +
+                        "yet (see plan_unlock and unlock).");
+                if (runs.InProgress && !stopCurrent) throw new ToolException("A Run is in progress; pass stop_current to stop it first.");
+                var syntaxError = await game.ParseScript(name);
+                if (syntaxError != null && runs.InProgress)
+                {
+                    var at = RunErrorInfo.At(syntaxError.Message, null, name, syntaxError.Source, syntaxError.StartIndex);
+                    throw new ToolException($"Script '{name}' does not parse: {at.Message} (line {at.Line}, column {at.Column}). " +
+                        "The Run in progress was not stopped.");
+                }
+                if (syntaxError == null && runs.InProgress) await runs.StopByTool(StopTimeout, cancel);
+
+                syntaxError ??= await game.StartSimulatedRun(name, options, cancel);
+                if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
+                return await runs.Wait(timeout, cancel);
+            },
+            Capabilities.Run, Capabilities.Simulation, Capabilities.State),
+        new Tool(
             "wait_run",
             "Waits again for the latest Run (see run_script) and returns it. When the Run has already ended it " +
-            "returns its final result immediately. Takes the same until_inventory and stop_when_met as run_script, " +
-            "and returns the same Run, including its summary: " + RunSummaryDescription,
+            "returns its final result immediately. Takes the same until_inventory and stop_when_met as run_script " +
+            "(but not for a simulated Run, see simulate_script), and returns the same Run, including its summary: " +
+            RunSummaryDescription,
             WaitSchema(),
             async (args, cancel) =>
             {
+                if (args.ContainsKey("stop_on_failures"))
+                    throw new ToolException("'stop_on_failures' is fixed when the Run starts: pass it to run_script or write_script, not wait_run.");
                 if (!runs.HasRun) throw new ToolException("No Run has been started yet.");
                 var (timeout, goal) = await WaitArgs(args, game);
+                if (goal != null && runs.IsSimulated)
+                    throw new ToolException("The latest Run is simulated: until_inventory and stop_when_met do not apply, " +
+                        "because an inventory goal is about the real farm.");
                 return await runs.Wait(timeout, cancel, goal);
             },
             Capabilities.Run),

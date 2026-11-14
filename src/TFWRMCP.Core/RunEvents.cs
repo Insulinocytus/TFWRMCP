@@ -2,33 +2,65 @@ using System.Collections.Generic;
 
 namespace TFWRMCP;
 
-/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionFailed/Errored/LeaderboardFinished in any order, Ended.</summary>
+/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionCalled/WarmupEnded/Errored/LeaderboardFinished in any order, Ended.</summary>
 public abstract class RunEvent { }
 
-/// <summary>A Run began, whoever started it. Output of earlier Runs is discarded.</summary>
+/// <summary>
+/// A Run began, whoever started it. Output of earlier Runs is discarded. <paramref name="simulated"/> marks a simulated
+/// Run on a temporary farm (started by <see cref="IGame.StartSimulatedRun"/>): <see cref="Inventory"/> is then that farm's.
+/// <paramref name="startedByTool"/> is set for the Run <see cref="IGame.StartRun"/> starts, never for one the human started.
+/// </summary>
 public sealed class RunStarted : RunEvent
 {
     public string Script { get; }
 
-    /// <summary>The real farm's whole inventory when the Run began.</summary>
+    /// <summary>The whole inventory of the farm the Run is on when it began.</summary>
     public Dictionary<string, double> Inventory { get; }
 
-    public RunStarted(string script, Dictionary<string, double> inventory)
+    public bool Simulated { get; }
+
+    public bool StartedByTool { get; }
+
+    public RunStarted(string script, Dictionary<string, double> inventory, bool simulated = false, bool startedByTool = false)
     {
         Script = script;
         Inventory = inventory;
+        Simulated = simulated;
+        StartedByTool = startedByTool;
     }
 }
 
 /// <summary>
-/// The Script called an action that counts as failed: it returned False, or it was harvest() on an entity that is
-/// not harvestable (the game then returns True, clears the crop and yields nothing). Actions on the temporary farm
-/// of simulate() and Leaderboard Runs are never reported.
+/// The Script called an action (plant, harvest, move, swap, use_item, place, dig, push, unlock or hover), one event per
+/// call. <paramref name="failed"/> is set when it returned False, or was harvest() on an entity that is not harvestable
+/// (the game then returns True, clears the crop and yields nothing). Actions on the temporary farm of simulate() and
+/// Leaderboard Runs are never reported; those of a simulated Run started by <see cref="IGame.StartSimulatedRun"/> are.
 /// </summary>
-public sealed class ActionFailed : RunEvent
+public sealed class ActionCalled : RunEvent
 {
     public string Function { get; }
-    public ActionFailed(string function) => Function = function;
+    public bool Failed { get; }
+    public ActionCalled(string function, bool failed)
+    {
+        Function = function;
+        Failed = failed;
+    }
+}
+
+/// <summary>
+/// The warmup of a simulated Run is over: <see cref="Inventory"/> and <see cref="Seconds"/> are the temporary farm's
+/// whole inventory and clock at that moment. <see cref="RunTracker"/> counts the Run's summary from here on.
+/// </summary>
+public sealed class WarmupEnded : RunEvent
+{
+    public Dictionary<string, double> Inventory { get; }
+    public double Seconds { get; }
+
+    public WarmupEnded(Dictionary<string, double> inventory, double seconds)
+    {
+        Inventory = inventory;
+        Seconds = seconds;
+    }
 }
 
 /// <summary>One entry of the game's output, already cut to the game's per-entry limit.</summary>
@@ -86,21 +118,25 @@ public enum RunEnd
 }
 
 /// <summary>
-/// The Run is over (for a Leaderboard Run: its result page is closed and the farm is usable again).
-/// <paramref name="inventory"/> is the real farm's whole inventory at that moment, null when it can no longer be
-/// read; <paramref name="ticks"/> is the number of game steps the Run executed (as get_tick_count counts them).
+/// The Run is over (for a Leaderboard Run: its result page is closed and the farm is usable again; for a simulated Run:
+/// the real farm is back). <paramref name="inventory"/> is the whole inventory of the farm the Run was on at the moment
+/// it ended, null when it can no longer be read; <paramref name="ticks"/> is the number of game steps the Run executed
+/// (as get_tick_count counts them). <paramref name="simulatedSeconds"/> is the temporary farm's clock when it ended,
+/// set for simulated Runs only.
 /// </summary>
 public sealed class RunEnded : RunEvent
 {
     public RunEnd How { get; }
     public Dictionary<string, double>? Inventory { get; }
     public long Ticks { get; }
+    public double? SimulatedSeconds { get; }
 
-    public RunEnded(RunEnd how, Dictionary<string, double>? inventory, long ticks)
+    public RunEnded(RunEnd how, Dictionary<string, double>? inventory, long ticks, double? simulatedSeconds = null)
     {
         How = how;
         Inventory = inventory;
         Ticks = ticks;
+        SimulatedSeconds = simulatedSeconds;
     }
 }
 

@@ -19,6 +19,7 @@ public sealed partial class GameAdapter : IGame
 
     readonly Dictionary<string, string> unavailable = new();
     FieldInfo? simField;
+    AccessTools.FieldRef<MainSim, Simulation>? simRef;
     FieldInfo? lockField;
 
     // Set by LoadSave; Unity null semantics make it read as null once the old scene is destroyed, until then GetScene reports Loading.
@@ -38,6 +39,7 @@ public sealed partial class GameAdapter : IGame
     {
         get
         {
+            if (SimulatedRun.Ticks is { } simulated) return simulated;
             var main = MainSim.Inst;
             if ((object)main == null || simField == null) return RunHooks.Ticks;
             var execution = (main.storedSim ?? (Simulation?)simField.GetValue(main))?.Execution;
@@ -45,14 +47,17 @@ public sealed partial class GameAdapter : IGame
         }
     }
 
-    /// <summary>Read like <see cref="RunTicks"/>: Duration is one aligned 8-byte field, so at worst a step old.</summary>
+    /// <summary>
+    /// Read like <see cref="RunTicks"/>: Duration is one aligned 8-byte field, so at worst a step old. The Run's failure
+    /// rule reads it on the simulation thread for every action call, hence the compiled field access instead of reflection.
+    /// </summary>
     public double GameSeconds
     {
         get
         {
             var main = MainSim.Inst;
-            if ((object)main == null || simField == null) return 0;
-            var sim = main.storedSim ?? (Simulation?)simField.GetValue(main);
+            if ((object)main == null || simRef == null) return 0;
+            var sim = main.storedSim ?? simRef(main);
             return sim == null ? 0 : sim.CurrentTime.Seconds;
         }
     }
@@ -67,6 +72,7 @@ public sealed partial class GameAdapter : IGame
     {
         this.info = info;
         simField = Resolve(Capabilities.State, Field("MainSim", "sim"), "MainSim.sim", warn);
+        if (simField != null) simRef = AccessTools.FieldRefAccess<MainSim, Simulation>(simField);
         lockField = Resolve(Capabilities.State, Field("MainSim", "lockSimulation"), "MainSim.lockSimulation", warn);
 
         ResolveMethods(Capabilities.Saves, warn,
@@ -76,6 +82,7 @@ public sealed partial class GameAdapter : IGame
 
         InstallScriptAndRunSupport(warn);
         ResolveUnlockDocs(warn);
+        InstallSimulationSupport(warn);
         ResolveBuiltins(warn);
     }
 
@@ -117,19 +124,20 @@ public sealed partial class GameAdapter : IGame
         Patch("Execution", "ApplySideEffect", warn, prefix: nameof(RunHooks.ActionBegin), postfix: nameof(RunHooks.ActionEnd));
     }
 
-    void Patch(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null)
+    void Patch(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null,
+        string capability = Capabilities.Run, Type? hooks = null)
     {
         var what = $"{type}.{method}";
-        var target = Resolve(Capabilities.Run, Method(type, method), what, warn);
+        var target = Resolve(capability, Method(type, method), what, warn);
         if (target == null) return;
-        HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(Method(typeof(RunHooks), name));
+        HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(Method(hooks ?? typeof(RunHooks), name));
         try
         {
             harmony.Patch(target, prefix: Hook(prefix), postfix: Hook(postfix), finalizer: Hook(finalizer));
         }
         catch (Exception e)
         {
-            Fail(Capabilities.Run, $"patching {what} failed ({e.Message})", warn);
+            Fail(capability, $"patching {what} failed ({e.Message})", warn);
         }
     }
 
@@ -218,6 +226,15 @@ public sealed partial class GameAdapter : IGame
 
     public Task<string> ReadScript(string name) => MainThread.Run(() => FindScript(name).CodeInput.text);
 
+    public Task<SyntaxError?> ParseScript(string name) => MainThread.Run(() => ParseError(FindScript(name), name));
+
+    SyntaxError? ParseError(CodeWindow window, string name)
+    {
+        if (window.Parse() != null) return null;
+        if (parseExceptionField!.GetValue(window) is not ParseException error) throw new ToolException($"The game did not parse '{name}'.");
+        return SyntaxErrorOf(window, error);
+    }
+
     public async Task<bool> WriteScript(string name, string code)
     {
         var created = await MainThread.Run(() =>
@@ -272,13 +289,18 @@ public sealed partial class GameAdapter : IGame
         if (main.IsExecuting())
             throw new ToolException("A Run is already in progress; use wait_run to wait for it or stop_run to stop it.");
 
-        window.PressExecuteOrStop();
+        RunHooks.StartingForTool = true;
+        try { window.PressExecuteOrStop(); }
+        finally { RunHooks.StartingForTool = false; }
         if (main.IsExecuting()) return null;
 
         if (parseExceptionField!.GetValue(window) is not ParseException error)
             throw new ToolException($"The game did not start the Run of '{name}'.");
-        return new SyntaxError { Message = CodeUtilities.RemoveSyntaxTags(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
+        return SyntaxErrorOf(window, error);
     }, cancel);
+
+    static SyntaxError SyntaxErrorOf(CodeWindow window, ParseException error) =>
+        new() { Message = CodeUtilities.RemoveSyntaxTags(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
 
     public Task StopRun() => MainThread.Run(() =>
     {
