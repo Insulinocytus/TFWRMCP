@@ -124,6 +124,14 @@ def check_saves(mcp):
     assert not is_error and saves["current"] == test, saves
 
 
+def check_no_getting_started(mcp):
+    # The test Save was loaded without data, where the game opens Getting Started unless the Mod (on by default) stops it.
+    ok(mcp, "save_game")
+    with open(os.path.join(SAVES_DIR, mcp.test_save, "save.json"), encoding="utf-8") as f:
+        pages = [p["value"] for p in json.load(f)["openDocPages"]]
+    assert "docs/getting_started.md" not in pages, pages
+
+
 def check_get_state(mcp):
     is_error, state = mcp.call("get_state")
     assert not is_error, state
@@ -569,7 +577,8 @@ def check_get_state_during_simulate(mcp):
 
 # Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it the original Save's Unlocks.
 CHECKS = [
-    check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_unlock_plan, check_docs,
+    check_handshake, check_tools_list, check_no_getting_started, check_get_state, check_saves, check_unlock_failures,
+    check_unlock_plan, check_docs,
     check_scripts, check_list_builtins, check_grant_unlocks, check_unlock_batch_and_costs, check_run_finishes,
     check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
     check_leaderboard_run, check_get_state_fields, check_until_inventory, check_tile_fields, check_run_summary,

@@ -14,13 +14,13 @@ public static class Patching
 
     public static void Warn(string message) => warn(message);
 
-    public static void Patch(Type hooks, MethodBase? target, string what, string? prefix = null, string? postfix = null)
+    public static void Patch(Type hooks, MethodBase? target, string what, string? prefix = null, string? postfix = null, string? finalizer = null)
     {
         HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(AccessTools.Method(hooks, name));
         try
         {
             if (target == null) throw new MissingMethodException(what);
-            Harmony.Patch(target, prefix: Hook(prefix), postfix: Hook(postfix));
+            Harmony.Patch(target, prefix: Hook(prefix), postfix: Hook(postfix), finalizer: Hook(finalizer));
         }
         catch (Exception e)
         {

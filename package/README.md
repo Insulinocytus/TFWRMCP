@@ -24,6 +24,8 @@ The server only listens on localhost. Its settings are in the game's options men
   call in progress is dropped and the Input Lock released, but a Run keeps going. If the port is taken, the server
   stays stopped and the reason shows here; the game itself runs normally.
 - **Don't open docs after an unlock**: stops the game from opening an Unlock's documentation when it is bought. On by default.
+- **Don't open Getting Started on a new save**: stops the game from opening the Getting Started docs when a Save that
+  has never been saved is loaded. On by default.
 - **Resource bar at bottom center**: anchors the resource bar at the bottom center of the screen and lets it grow
   from the middle; switching it off puts the bar back at the game's top left right away. On by default.
 - **Auto-arrange code windows**: whenever a Run starts or ends, a Script joins the Run for the first time, a Script is

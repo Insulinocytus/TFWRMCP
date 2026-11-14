@@ -12,8 +12,8 @@ namespace TFWRMCP.Mod;
 /// <summary>
 /// The "MCP" tab of the game's options menu. Its rows are the game's own cycle and slider rows, rewired to the BepInEx
 /// config instead of options.txt: port (slider hidden, text field only), server status with a restart button, and the
-/// on/off switches for suppressing Unlock docs, the resource bar at bottom center, auto-arranging code windows and
-/// auto-centering the camera.
+/// on/off switches for suppressing Unlock docs and Getting Started, the resource bar at bottom center, auto-arranging code
+/// windows and auto-centering the camera.
 /// </summary>
 public static class McpOptions
 {
@@ -21,6 +21,7 @@ public static class McpOptions
     const string PortRow = "tfwrmcp port";
     const string ServerRow = "tfwrmcp server";
     const string DocsRow = "tfwrmcp unlock docs";
+    const string GettingStartedRow = "tfwrmcp getting started";
     const string ResourceBarRow = "tfwrmcp resource bar";
     const string ArrangeRow = "tfwrmcp arrange windows";
     const string CameraRow = "tfwrmcp camera";
@@ -85,10 +86,11 @@ public static class McpOptions
         }
 
         var docs = Switch(DocsRow, -1002);
-        var bar = Switch(ResourceBarRow, -1003);
-        var arrange = Switch(ArrangeRow, -1004);
-        var camera = Switch(CameraRow, -1005);
-        return new List<OptionSO> { port, server, docs, bar, arrange, camera };
+        var gettingStarted = Switch(GettingStartedRow, -1003);
+        var bar = Switch(ResourceBarRow, -1004);
+        var arrange = Switch(ArrangeRow, -1005);
+        var camera = Switch(CameraRow, -1006);
+        return new List<OptionSO> { port, server, docs, gettingStarted, bar, arrange, camera };
     }
 
     // OptionMenu.ChangeCategory(string), postfix: the rows were just instantiated and wired to OptionHolder by the game.
@@ -128,6 +130,7 @@ public static class McpOptions
         }
 
         Toggle(uis, DocsRow, zh ? "禁止解锁后自动弹出说明" : "Don't open docs after an unlock", plugin.SuppressUnlockDocs);
+        Toggle(uis, GettingStartedRow, zh ? "禁止新存档弹出入门指南" : "Don't open Getting Started on a new save", plugin.SuppressGettingStarted);
         Toggle(uis, ResourceBarRow, zh ? "资源栏底部居中" : "Resource bar at bottom center", plugin.ResourceBarAtBottom);
         Toggle(uis, ArrangeRow, zh ? "自动整理代码窗口" : "Auto-arrange code windows", plugin.AutoArrangeWindows);
         Toggle(uis, CameraRow, zh ? "相机自动对准农场" : "Auto-center camera on farm", plugin.AutoCenterCamera);

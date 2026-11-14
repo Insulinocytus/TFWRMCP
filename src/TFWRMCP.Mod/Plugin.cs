@@ -13,6 +13,8 @@ public sealed class Plugin : BaseUnityPlugin
 
     public ConfigEntry<bool> SuppressUnlockDocs { get; private set; } = null!;
 
+    public ConfigEntry<bool> SuppressGettingStarted { get; private set; } = null!;
+
     public ConfigEntry<bool> ResourceBarAtBottom { get; private set; } = null!;
 
     public ConfigEntry<bool> AutoArrangeWindows { get; private set; } = null!;
@@ -31,6 +33,8 @@ public sealed class Plugin : BaseUnityPlugin
             new AcceptableValueRange<int>(1, 65535)));
         SuppressUnlockDocs = Config.Bind("Game", "SuppressUnlockDocs", true,
             "Do not open an Unlock's documentation automatically when it is bought.");
+        SuppressGettingStarted = Config.Bind("Game", "SuppressGettingStarted", true,
+            "Do not open the Getting Started docs when a new Save is loaded.");
         ResourceBarAtBottom = Config.Bind("Layout", "ResourceBarAtBottom", true,
             "Anchor the resource bar at the bottom center of the screen instead of the game's top left.");
         AutoArrangeWindows = Config.Bind("Layout", "AutoArrangeWindows", true,
@@ -45,6 +49,7 @@ public sealed class Plugin : BaseUnityPlugin
         Patching.Configure(Logger.LogWarning);
         gameObject.AddComponent<UnlockToastOverlay>().Install(this);
         gameObject.AddComponent<ResourceBarPlacement>().Install(this);
+        GettingStartedSuppression.Install(this);
         gameObject.AddComponent<CodeWindowArranger>().Install(this);
         gameObject.AddComponent<CameraAutoCenter>().Install(this);
         McpOptions.Install(this);
