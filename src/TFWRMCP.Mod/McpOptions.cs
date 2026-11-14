@@ -20,6 +20,7 @@ public static class McpOptions
     const string PortRow = "tfwrmcp port";
     const string ServerRow = "tfwrmcp server";
     const string DocsRow = "tfwrmcp unlock docs";
+    const string ResourceBarRow = "tfwrmcp resource bar";
 
     static Plugin plugin = null!;
     static List<OptionSO>? rows;
@@ -74,7 +75,9 @@ public static class McpOptions
         server.options = new List<string> { "" };
         var docs = Row(cycle, DocsRow, -1002);
         docs.options = new List<string> { "enabled", "disabled" };
-        return new List<OptionSO> { port, server, docs };
+        var bar = Row(cycle, ResourceBarRow, -1003);
+        bar.options = new List<string> { "enabled", "disabled" };
+        return new List<OptionSO> { port, server, docs, bar };
     }
 
     // OptionMenu.ChangeCategory(string), postfix: the rows were just instantiated and wired to OptionHolder by the game.
@@ -113,18 +116,22 @@ public static class McpOptions
             Title(server).text = Status(zh);
         }
 
-        if (uis.TryGetValue(DocsRow, out var docsUi) && docsUi is CycleOptionUI docs)
-        {
-            string State() => plugin.SuppressUnlockDocs.Value ? "enabled" : "disabled";
-            Title(docs).text = zh ? "禁止解锁后自动弹出说明" : "Don't open docs after an unlock";
-            ColoredButton? button = null;
-            button = Rebind(docs, State(), () =>
-            {
-                plugin.SuppressUnlockDocs.Value = !plugin.SuppressUnlockDocs.Value;
-                button!.Text = State();
-            });
-        }
+        Toggle(uis, DocsRow, zh ? "禁止解锁后自动弹出说明" : "Don't open docs after an unlock", plugin.SuppressUnlockDocs);
+        Toggle(uis, ResourceBarRow, zh ? "资源栏底部居中" : "Resource bar at bottom center", plugin.ResourceBarAtBottom);
     });
+
+    static void Toggle(Dictionary<string, OptionUI> uis, string row, string title, BepInEx.Configuration.ConfigEntry<bool> entry)
+    {
+        if (!uis.TryGetValue(row, out var ui) || ui is not CycleOptionUI cycle) return;
+        string State() => entry.Value ? "enabled" : "disabled";
+        Title(cycle).text = title;
+        ColoredButton? button = null;
+        button = Rebind(cycle, State(), () =>
+        {
+            entry.Value = !entry.Value;
+            button!.Text = State();
+        });
+    }
 
     static ColoredButton Rebind(CycleOptionUI row, string text, Action clicked)
     {

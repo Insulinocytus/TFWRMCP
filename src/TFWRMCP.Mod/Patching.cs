@@ -12,6 +12,8 @@ public static class Patching
 
     public static void Configure(Action<string> warning) => warn = warning;
 
+    public static void Warn(string message) => warn(message);
+
     public static void Patch(Type hooks, MethodBase? target, string what, string? prefix = null, string? postfix = null)
     {
         HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(AccessTools.Method(hooks, name));
