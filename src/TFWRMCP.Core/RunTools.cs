@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
@@ -86,6 +87,14 @@ public static partial class Tools
         return TimeSpan.FromSeconds(Math.Min(seconds, MaxTimeoutSeconds));
     }
 
+    static async Task<RunSnapshot> StartAndWait(IGame game, RunTracker runs, string name, TimeSpan timeout,
+        InventoryGoal? goal, CancellationToken cancel)
+    {
+        var syntaxError = await game.StartRun(name, cancel);
+        if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
+        return await runs.Wait(timeout, cancel, goal);
+    }
+
     static IEnumerable<Tool> ScriptAndRunTools(IGame game, RunTracker runs) => new[]
     {
         new Tool(
@@ -108,13 +117,38 @@ public static partial class Tools
             "write_script",
             "Creates a Script or overwrites an existing one. It shows up in the game's code windows immediately and " +
             "is saved to disk. Names follow the game's rules; a name that differs from an existing window only by " +
-            "case is rejected. A Script that is being run cannot be overwritten (stop the Run first).",
-            Schema(("name", "string", "Script name.", true), ("code", "string", "Full source code of the Script.", true)),
-            async (args, _) =>
+            "case is rejected. A Script that is being run cannot be overwritten (stop the Run first, or pass " +
+            "stop_current). Returns {name, created}; with stop_current and a Run in progress also stopped (the " +
+            "stopped Run, as stop_run returns it); with run also run (the Run, as run_script returns it; parse_error " +
+            "on a syntax error, the Script is still written). Use stop_current and run together to replace and " +
+            "rerun a running Script in one call.",
+            WaitSchema(
+                ("name", "string", "Script name.", true),
+                ("code", "string", "Full source code of the Script.", true),
+                ("stop_current", "boolean", "Before writing, stop the Run in progress (like stop_run), whoever " +
+                    "started it. Default false.", false),
+                ("run", "boolean", "After writing, run the Script (like run_script; timeout_seconds, " +
+                    "until_inventory and stop_when_met apply as there). With a Run in progress this needs " +
+                    "stop_current, otherwise the call fails and writes nothing. Default false.", false)),
+            async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
                 var code = RequiredString(args, "code");
-                return new { name, created = await game.WriteScript(name, code) };
+                var stopCurrent = OptionalBool(args, "stop_current");
+                var run = OptionalBool(args, "run");
+                if ((stopCurrent || run) && game.UnavailableReason(Capabilities.Run) is { } reason)
+                    throw new ToolException($"'stop_current' and 'run' are unavailable: capability '{Capabilities.Run}' " +
+                        $"failed to resolve ({reason}).");
+                var timeout = run ? WaitTimeout(args) : TimeSpan.Zero;
+                var goal = run ? await InventoryGoalFrom(args, game) : null;
+                if (run && !stopCurrent && runs.InProgress)
+                    throw new ToolException("A Run is in progress; pass stop_current to stop it first. Nothing was written.");
+
+                var result = new Dictionary<string, object?> { ["name"] = name };
+                if (stopCurrent && runs.InProgress) result["stopped"] = await runs.StopByTool(StopTimeout, cancel);
+                result["created"] = await game.WriteScript(name, code);
+                if (run) result["run"] = await StartAndWait(game, runs, name, timeout, goal, cancel);
+                return result;
             },
             Capabilities.Scripts),
         new Tool(
@@ -147,9 +181,7 @@ public static partial class Tools
                 var name = RequiredString(args, "name");
                 var timeout = WaitTimeout(args);
                 var goal = await InventoryGoalFrom(args, game);
-                var syntaxError = await game.StartRun(name, cancel);
-                if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
-                return await runs.Wait(timeout, cancel, goal);
+                return await StartAndWait(game, runs, name, timeout, goal, cancel);
             },
             Capabilities.Run),
         new Tool(

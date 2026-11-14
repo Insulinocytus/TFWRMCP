@@ -168,6 +168,15 @@ public sealed class RunTracker
         }
     }
 
+    /// <summary>Whether a Run is in progress, whoever started it.</summary>
+    public bool InProgress
+    {
+        get
+        {
+            lock (gate) return current.Status == RunStatus.Running;
+        }
+    }
+
     void OnEvent(RunEvent e)
     {
         var stopAfterError = false;

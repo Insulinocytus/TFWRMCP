@@ -55,6 +55,11 @@ seconds in many clients) and call `wait_run` again to keep waiting. Pass `until_
 `inventory` and `met`. With `stop_when_met` the Run is stopped at that moment, so "run until carrot ≥ 600, then stop"
 is a single call.
 
+`write_script` refuses to overwrite a Script that is being run. Pass `stop_current: true` to first stop the Run in
+progress (returned as `stopped`) and `run: true` to run the Script right after writing it (returned as `run`, taking
+the same `timeout_seconds`, `until_inventory` and `stop_when_met` as `run_script`), so "stop, overwrite, rerun" is a
+single call. `run` while a Run is in progress without `stop_current` fails and writes nothing.
+
 Every Run (from `run_script`, `wait_run`, `stop_run` and `get_state`'s `run`) carries a summary so a script that spins
 without progress shows: `inventory_delta` (net change per item since the Run began, non-zero items only, covering
 everything: script actions, the game's own production and consumption, Unlocks bought), `failed_calls` (per function,
