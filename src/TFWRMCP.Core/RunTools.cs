@@ -76,6 +76,10 @@ public static partial class Tools
         return new InventoryGoal(atLeast, stopWhenMet);
     }
 
+    /// <summary>Every wait parameter that run_script, wait_run and write_script with run accept.</summary>
+    static async Task<(TimeSpan Timeout, InventoryGoal? Goal)> WaitArgs(JObject args, IGame game) =>
+        (WaitTimeout(args), await InventoryGoalFrom(args, game));
+
     static TimeSpan WaitTimeout(JObject args)
     {
         var token = args["timeout_seconds"];
@@ -139,8 +143,7 @@ public static partial class Tools
                 if ((stopCurrent || run) && game.UnavailableReason(Capabilities.Run) is { } reason)
                     throw new ToolException($"'stop_current' and 'run' are unavailable: capability '{Capabilities.Run}' " +
                         $"failed to resolve ({reason}).");
-                var timeout = run ? WaitTimeout(args) : TimeSpan.Zero;
-                var goal = run ? await InventoryGoalFrom(args, game) : null;
+                var (timeout, goal) = run ? await WaitArgs(args, game) : default;
                 if (run && !stopCurrent && runs.InProgress)
                     throw new ToolException("A Run is in progress; pass stop_current to stop it first. Nothing was written.");
 
@@ -179,8 +182,7 @@ public static partial class Tools
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
-                var timeout = WaitTimeout(args);
-                var goal = await InventoryGoalFrom(args, game);
+                var (timeout, goal) = await WaitArgs(args, game);
                 return await StartAndWait(game, runs, name, timeout, goal, cancel);
             },
             Capabilities.Run),
@@ -192,9 +194,8 @@ public static partial class Tools
             WaitSchema(),
             async (args, cancel) =>
             {
-                var timeout = WaitTimeout(args);
                 if (!runs.HasRun) throw new ToolException("No Run has been started yet.");
-                var goal = await InventoryGoalFrom(args, game);
+                var (timeout, goal) = await WaitArgs(args, game);
                 return await runs.Wait(timeout, cancel, goal);
             },
             Capabilities.Run),
