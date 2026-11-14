@@ -21,8 +21,12 @@ _避免_: Endpoint、命令、API
 _避免_: Program、代码、宏
 
 **Run**:
-游戏对一个 Script 的一次执行，从开始到正常结束、出错或被停止。
+游戏对一个 Script 的一次执行，从开始到正常结束、出错或被停止。一次 Run 可以涉及多个 Script。
 _避免_: Execution、任务
+
+**参与 Run 的 Script**:
+发起 Run 的 Script，以及本次 Run 中执行过其代码（如被 import）的 Script；它们的 code window 显示为运行中，直到 Run 结束。
+_避免_: 运行中的文件、活动窗口
 
 **Leaderboard Run**:
 由 `leaderboard_run()` 在临时农场上发起的计时 Run，其结果会提交到 Steam 排行榜。
@@ -47,3 +51,7 @@ _避免_: Upgrade 等级、科技等级
 **购买 Unlock**:
 花费物品使某个 Unlock 的 Unlock 等级 +1，包括首次解锁（0→1）和再次购买（N→N+1）。
 _避免_: 升级、Upgrade、研究
+
+**资源栏**:
+游戏界面上显示当前持有物品数量的面板。
+_避免_: 物品面板、Inventory、资源 UI
