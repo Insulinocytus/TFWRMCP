@@ -5,18 +5,24 @@ namespace TFWRMCP;
 /// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionCalled/Errored/LeaderboardFinished in any order, Ended.</summary>
 public abstract class RunEvent { }
 
-/// <summary>A Run began, whoever started it. Output of earlier Runs is discarded.</summary>
+/// <summary>
+/// A Run began, whoever started it. Output of earlier Runs is discarded. <paramref name="simulated"/> marks a simulated
+/// Run on a temporary farm (started by <see cref="IGame.StartSimulation"/>): <see cref="Inventory"/> is then that farm's.
+/// </summary>
 public sealed class RunStarted : RunEvent
 {
     public string Script { get; }
 
-    /// <summary>The real farm's whole inventory when the Run began.</summary>
+    /// <summary>The whole inventory of the farm the Run is on when it began.</summary>
     public Dictionary<string, double> Inventory { get; }
 
-    public RunStarted(string script, Dictionary<string, double> inventory)
+    public bool Simulated { get; }
+
+    public RunStarted(string script, Dictionary<string, double> inventory, bool simulated = false)
     {
         Script = script;
         Inventory = inventory;
+        Simulated = simulated;
     }
 }
 
@@ -92,21 +98,25 @@ public enum RunEnd
 }
 
 /// <summary>
-/// The Run is over (for a Leaderboard Run: its result page is closed and the farm is usable again).
-/// <paramref name="inventory"/> is the real farm's whole inventory at that moment, null when it can no longer be
-/// read; <paramref name="ticks"/> is the number of game steps the Run executed (as get_tick_count counts them).
+/// The Run is over (for a Leaderboard Run: its result page is closed and the farm is usable again; for a simulated Run:
+/// the real farm is back). <paramref name="inventory"/> is the whole inventory of the farm the Run was on at the moment
+/// it ended, null when it can no longer be read; <paramref name="ticks"/> is the number of game steps the Run executed
+/// (as get_tick_count counts them). <paramref name="simulatedSeconds"/> is the temporary farm's clock when it ended,
+/// set for simulated Runs only.
 /// </summary>
 public sealed class RunEnded : RunEvent
 {
     public RunEnd How { get; }
     public Dictionary<string, double>? Inventory { get; }
     public long Ticks { get; }
+    public double? SimulatedSeconds { get; }
 
-    public RunEnded(RunEnd how, Dictionary<string, double>? inventory, long ticks)
+    public RunEnded(RunEnd how, Dictionary<string, double>? inventory, long ticks, double? simulatedSeconds = null)
     {
         How = how;
         Inventory = inventory;
         Ticks = ticks;
+        SimulatedSeconds = simulatedSeconds;
     }
 }
 

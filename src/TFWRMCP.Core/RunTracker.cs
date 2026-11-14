@@ -67,6 +67,10 @@ public sealed class RunSnapshot
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public string? Script { get; set; }
 
+    /// <summary>True when the Run was on a temporary farm: its summary then counts that farm, and the real farm was paused meanwhile.</summary>
+    [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
+    public bool Simulated { get; set; }
+
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public RunErrorInfo? Error { get; set; }
 
@@ -152,6 +156,7 @@ public sealed class RunTracker
         public Dictionary<string, double>? StartInventory;
         public Stopwatch? Clock;
         public double StartGameSeconds;
+        public bool Simulated;
         public double EndGameSeconds;
         public readonly Dictionary<string, int> Failed = new();
         public Dictionary<string, double>? EndInventory;
@@ -187,6 +192,15 @@ public sealed class RunTracker
         }
     }
 
+    /// <summary>Whether the latest Run was a simulated one, in progress or over.</summary>
+    public bool IsSimulated
+    {
+        get
+        {
+            lock (gate) return current.Simulated;
+        }
+    }
+
     void OnEvent(RunEvent e)
     {
         var stopAfterError = false;
@@ -205,7 +219,7 @@ public sealed class RunTracker
                 current = new Record
                 {
                     Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
-                    StartGameSeconds = game.GameSeconds,
+                    Simulated = started.Simulated, StartGameSeconds = started.Simulated ? 0 : game.GameSeconds,
                 };
                 return;
             }
@@ -240,7 +254,7 @@ public sealed class RunTracker
                         ended.How == RunEnd.Terminated ? RunStatus.Finished :
                         current.StopRequestedByTool ? RunStatus.StoppedByTool : RunStatus.StoppedByUser;
                     current.Clock!.Stop();
-                    current.EndGameSeconds = game.GameSeconds;
+                    current.EndGameSeconds = ended.SimulatedSeconds ?? game.GameSeconds;
                     current.EndInventory = ended.Inventory;
                     current.EndTicks = ended.Ticks;
                     current.Over.TrySetResult(true);
@@ -282,19 +296,29 @@ public sealed class RunTracker
         return Report(run, withOutput, live);
     }
 
-    /// <summary>Describes the Run; while it is running its inventory delta needs the current inventory, which <paramref name="live"/> may already hold.</summary>
+    /// <summary>
+    /// Describes the Run; while it is running its inventory delta needs the current inventory, which <paramref name="live"/>
+    /// may already hold. A simulated Run reads its temporary farm instead, never <paramref name="live"/>.
+    /// </summary>
     async Task<RunSnapshot> Report(Record run, bool withOutput, Dictionary<string, double>? live = null)
     {
-        if (live == null && IsRunning(run)) live = await ReadInventory();
-        lock (gate) return Describe(run, withOutput, live);
+        TemporaryFarm? farm = null;
+        if (run.Simulated && IsRunning(run))
+        {
+            farm = await game.ReadTemporaryFarm();
+            live = farm?.Inventory;
+        }
+        else if (live == null && IsRunning(run)) live = await ReadInventory();
+        lock (gate) return Describe(run, withOutput, live, farm?.Seconds);
     }
 
-    RunSnapshot Describe(Record r, bool withOutput, Dictionary<string, double>? live)
+    RunSnapshot Describe(Record r, bool withOutput, Dictionary<string, double>? live, double? liveSeconds)
     {
         var snapshot = new RunSnapshot
         {
             Status = r.Status,
             Script = r.Script,
+            Simulated = r.Simulated,
             Error = r.Error,
             Leaderboard = r.Leaderboard,
             Output = withOutput ? new List<string>(r.Output) : null,
@@ -309,10 +333,11 @@ public sealed class RunTracker
                 .Select(item => (Item: item, Change: end.GetValueOrDefault(item) - r.StartInventory.GetValueOrDefault(item)))
                 .Where(c => c.Change != 0)
                 .ToDictionary(c => c.Item, c => c.Change);
-        snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
+        if (!r.Simulated) snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
         snapshot.Ticks = running ? game.RunTicks : r.EndTicks;
         snapshot.Seconds = Math.Round(r.Clock.Elapsed.TotalSeconds, 3);
-        var gameSeconds = Math.Round((running ? game.GameSeconds : r.EndGameSeconds) - r.StartGameSeconds, 3);
+        var now = !running ? r.EndGameSeconds : r.Simulated ? liveSeconds ?? 0 : game.GameSeconds;
+        var gameSeconds = Math.Round(now - r.StartGameSeconds, 3);
         snapshot.GameSeconds = gameSeconds;
         if (snapshot.InventoryDelta != null && gameSeconds > 0)
             snapshot.Rates = snapshot.InventoryDelta.ToDictionary(c => c.Key, c => c.Value / gameSeconds);

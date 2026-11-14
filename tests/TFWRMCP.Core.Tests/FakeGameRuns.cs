@@ -30,8 +30,16 @@ public sealed partial class FakeGame
 
     public void Emit(RunEvent e)
     {
-        if (e is RunStarted) RunActive = true;
-        if (e is RunEnded) RunActive = false;
+        if (e is RunStarted started)
+        {
+            RunActive = true;
+            simulating = started.Simulated;
+        }
+        if (e is RunEnded)
+        {
+            RunActive = false;
+            simulating = false;
+        }
         RunEvents?.Invoke(e);
     }
 
@@ -73,9 +81,41 @@ public sealed partial class FakeGame
     public Task StopRun()
     {
         StopCalls++;
-        if (RunActive) Emit(new RunEnded(RunEnd.Stopped, new Dictionary<string, double>(State.Inventory), RunTicks));
+        if (!RunActive) return Task.CompletedTask;
+        if (simulating)
+            Emit(new RunEnded(RunEnd.Stopped, new Dictionary<string, double>(TemporaryInventory), RunTicks, TemporarySeconds));
+        else
+            Emit(new RunEnded(RunEnd.Stopped, new Dictionary<string, double>(State.Inventory), RunTicks));
         return Task.CompletedTask;
     }
+
+    /// <summary>The simulated Runs started so far: Script name and requested game seconds.</summary>
+    public List<(string Name, double GameSeconds)> Simulations { get; } = new();
+
+    /// <summary>Runs synchronously inside StartSimulation once the Run has started.</summary>
+    public Action<string>? OnStartSimulation { get; set; }
+
+    /// <summary>The temporary farm's inventory and clock; tests change them by hand.</summary>
+    public Dictionary<string, double> TemporaryInventory { get; set; } = new();
+
+    public double TemporarySeconds { get; set; }
+
+    bool simulating;
+
+    public Task<SyntaxError?> StartSimulation(string name, double gameSeconds, CancellationToken cancel)
+    {
+        cancel.ThrowIfCancellationRequested();
+        if (!Scripts.ContainsKey(name)) throw new ToolException($"No Script named '{name}'.");
+        if (RunActive) throw new ToolException("A Run is already in progress.");
+        if (SyntaxErrors.TryGetValue(name, out var error)) return Task.FromResult<SyntaxError?>(error);
+        Simulations.Add((name, gameSeconds));
+        Emit(new RunStarted(name, new Dictionary<string, double>(TemporaryInventory), simulated: true));
+        OnStartSimulation?.Invoke(name);
+        return Task.FromResult<SyntaxError?>(null);
+    }
+
+    public Task<TemporaryFarm?> ReadTemporaryFarm() => Task.FromResult(
+        simulating ? new TemporaryFarm(new Dictionary<string, double>(TemporaryInventory), TemporarySeconds) : null);
 
     public async Task WaitForRun()
     {

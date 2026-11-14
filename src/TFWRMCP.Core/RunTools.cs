@@ -29,10 +29,11 @@ public static partial class Tools
         "also counts as a failed harvest, because the game then returns True, clears the crop and yields " +
         "nothing; till() has no return value and is not counted), ticks (game steps the Run has executed, the " +
         "unit of get_tick_count()), seconds (real elapsed time), game_seconds (elapsed time on the game clock " +
-        "that get_time() reads, of the real farm) and rates (item name to inventory_delta divided by " +
-        "game_seconds, the net change per game second; absent when game_seconds is 0 or inventory_delta is " +
-        "absent); ticks, seconds and game_seconds stop growing when the Run ends. Actions and items on the " +
-        "temporary farm of simulate() and Leaderboard Runs do not count; Runs started by the human do. " +
+        "that get_time() reads, of the real farm; of the temporary farm for a simulated Run) and rates (item " +
+        "name to inventory_delta divided by game_seconds, the net change per game second; absent when " +
+        "game_seconds is 0 or inventory_delta is absent); ticks, seconds and game_seconds stop growing when the " +
+        "Run ends. Actions and items on the temporary farm of simulate() and Leaderboard Runs do not count; " +
+        "Runs started by the human do; a simulated Run counts its own temporary farm's items and clock. " +
         "parse_error results have none of these. Use them to notice a Script that spins without progress, " +
         "e.g. plant() failing on occupied tiles while items are consumed.";
 
@@ -215,15 +216,67 @@ public static partial class Tools
             },
             Capabilities.Run),
         new Tool(
+            "simulate_script",
+            "Runs a Script as a simulated Run on a temporary farm that starts with this Save's Unlocks and items, at " +
+            "the game's top speed, and waits for it to end. The temporary farm is thrown away afterwards, so the Save, " +
+            "the real farm's items and the real farm's clock stay as they were. The real farm is completely paused " +
+            "for as long as the simulation runs: nothing grows or accumulates there meanwhile, so count the " +
+            "simulation's real duration (it depends on your CPU; a long game_seconds can take minutes) into your " +
+            "plan. The temporary farm always has the game's base Unlocks, which cannot be switched off. It ends " +
+            "once its own game clock reaches game_seconds (to within one op), as a normal end: status finished. " +
+            "Needs the simulation Unlock (as simulate() in a Script does) and fails when a Run is already in " +
+            "progress unless stop_current is set. The output is cleared when the simulation starts. Returns the " +
+            "Run as run_script does, with simulated: true (also in wait_run and get_state): status, output, error " +
+            "(parse_error for a syntax error without starting anything; a runtime error stops the simulation and " +
+            "gives status error), and the summary, which counts the temporary farm only: " + RunSummaryDescription +
+            " wait_run, stop_run (back to the real farm at once) and the human's stop button apply to it; wait_run " +
+            "refuses until_inventory and stop_when_met for a simulated Run, and a simulated Run has no failed_calls.",
+            Schema(
+                ("name", "string", "Script name (case-sensitive).", true),
+                ("game_seconds", "number", "How long the temporary farm runs, in game seconds (the clock get_time() " +
+                    "reads there, starting at 0); a number greater than 0.", true),
+                ("stop_current", "boolean", "Stop the Run in progress first (like stop_run), whoever started it. " +
+                    "Default false.", false),
+                ("timeout_seconds", "number", TimeoutDescription, false)),
+            async (args, cancel) =>
+            {
+                var name = RequiredString(args, "name");
+                var gameSeconds = args["game_seconds"] is { Type: JTokenType.Integer or JTokenType.Float } seconds && (double)seconds > 0
+                    && double.IsFinite((double)seconds)
+                    ? (double)seconds
+                    : throw new ToolException("'game_seconds' is required and must be a number greater than 0.");
+                var stopCurrent = OptionalBool(args, "stop_current");
+                var timeout = WaitTimeout(args);
+
+                var unlocks = (await game.GetState(StateParts.Unlocks)).Unlocks;
+                if ((unlocks.FirstOrDefault(u => u.Name == "simulation")?.Level ?? 0) < 1)
+                    throw new ToolException("simulate_script needs the 'simulation' Unlock, which this Save has not bought " +
+                        "yet (see plan_unlock and unlock).");
+                if (runs.InProgress)
+                {
+                    if (!stopCurrent) throw new ToolException("A Run is in progress; pass stop_current to stop it first.");
+                    await runs.StopByTool(StopTimeout, cancel);
+                }
+
+                var syntaxError = await game.StartSimulation(name, gameSeconds, cancel);
+                if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
+                return await runs.Wait(timeout, cancel);
+            },
+            Capabilities.Run, Capabilities.Simulation, Capabilities.State),
+        new Tool(
             "wait_run",
             "Waits again for the latest Run (see run_script) and returns it. When the Run has already ended it " +
-            "returns its final result immediately. Takes the same until_inventory and stop_when_met as run_script, " +
-            "and returns the same Run, including its summary: " + RunSummaryDescription,
+            "returns its final result immediately. Takes the same until_inventory and stop_when_met as run_script " +
+            "(but not for a simulated Run, see simulate_script), and returns the same Run, including its summary: " +
+            RunSummaryDescription,
             WaitSchema(),
             async (args, cancel) =>
             {
                 if (!runs.HasRun) throw new ToolException("No Run has been started yet.");
                 var (timeout, goal) = await WaitArgs(args, game);
+                if (goal != null && runs.IsSimulated)
+                    throw new ToolException("The latest Run is simulated: until_inventory and stop_when_met do not apply, " +
+                        "because an inventory goal is about the real farm.");
                 return await runs.Wait(timeout, cancel, goal);
             },
             Capabilities.Run),
