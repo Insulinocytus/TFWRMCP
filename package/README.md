@@ -23,7 +23,9 @@ The server only listens on localhost. Its settings are in the game's options men
 - **MCP server**: shows whether the server is listening; **Restart** listens again on the configured port. A tool
   call in progress is dropped and the Input Lock released, but a Run keeps going. If the port is taken, the server
   stays stopped and the reason shows here; the game itself runs normally.
-- **Don't open docs after an unlock**: stops the game from opening an Unlock's documentation when it is bought.
+- **Don't open docs after an unlock**: stops the game from opening an Unlock's documentation when it is bought. On by default.
+- **Resource bar at bottom center**: anchors the resource bar at the bottom center of the screen and lets it grow
+  from the middle; switching it off puts the bar back at the game's top left right away. On by default.
 
 ## Tools
 
