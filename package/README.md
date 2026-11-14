@@ -61,9 +61,22 @@ is a single call. `run_script` also takes `stop_after_seconds`: the Run is stopp
 `stop_when_met`, whichever comes first stops it. To measure production, call
 `run_script(stop_after_seconds=60, timeout_seconds=0)`, then `wait_run` until the Run has ended and read `rates`.
 
+`run_script` also takes `stop_on_failures`, so a Script that gets stuck failing calls does not burn game time unnoticed:
+`{"ratio": 0.5, "min_calls": 100, "ignore": ["harvest"]}` (every key optional, `{}` gives the defaults shown except
+`ignore`). For each function not in `ignore`, the last 10 seconds of the game clock (the one `get_time()` reads) are
+checked: once it was called at least `min_calls` times in that window and more than `ratio` of those calls failed
+(the calls `failed_calls` counts; a ratio exactly equal to `ratio` does not trigger), the Run is stopped like
+`stop_run` does. Functions are judged separately, so a stuck `move` is caught while `harvest` succeeds; list functions
+your Script fails on purpose in `ignore`. The result then has status `stopped_by_tool` and `failing` (function name to
+its failed calls in the window, every function that met the condition); a Run that ends any other way has no `failing`.
+The rule belongs to the Run: it keeps working after the call has returned `running`, whichever of it,
+`stop_after_seconds` and `stop_when_met` comes first stops the Run, and it ends with the Run. Runs the human starts
+are never watched. `wait_run` does not take it, and an invalid value (`ratio` outside (0, 1], `min_calls` not a
+positive integer, `ignore` not a list of strings, an unknown key) fails without starting anything.
+
 `write_script` refuses to overwrite a Script that is being run. Pass `stop_current: true` to first stop the Run in
 progress (returned as `stopped`) and `run: true` to run the Script right after writing it (returned as `run`, taking
-the same `timeout_seconds`, `until_inventory` and `stop_when_met` as `run_script`), so "stop, overwrite, rerun" is a
+the same `timeout_seconds`, `until_inventory`, `stop_when_met` and `stop_on_failures` as `run_script`), so "stop, overwrite, rerun" is a
 single call. `run` while a Run is in progress without `stop_current` fails and writes nothing.
 
 Every Run (from `run_script`, `wait_run`, `stop_run` and `get_state`'s `run`) carries a summary so a script that spins
