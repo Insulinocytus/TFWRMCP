@@ -30,6 +30,9 @@ public static class SimulatedRun
         // Taken when the temporary farm's Script ends, emitted once the real farm is back.
         public volatile RunEnded? Ended;
 
+        // Whether Ended was already set when the latest MainSim.Update began.
+        public volatile bool OverBeforeUpdate;
+
         public Active(Simulation sim, Duration warmup, Duration deadline)
         {
             Sim = sim;
@@ -226,6 +229,14 @@ public static class SimulatedRun
         }
     }
 
+    // MainSim.Update(), prefix: whether the Script was already over when this frame began. The Script can end on the
+    // simulation thread while Update runs, and the game then restores the real farm in the next one.
+    public static void BeforeUpdate()
+    {
+        var run = current;
+        if (run != null) run.OverBeforeUpdate = run.Ended != null;
+    }
+
     // MainSim.Update(), postfix. The game restores the real farm in Update once the temporary farm's Script is over, but
     // only while the Leaderboard overlay is active; otherwise it would stay paused behind the temporary farm forever.
     public static void AfterUpdate(MainSim __instance)
@@ -240,7 +251,7 @@ public static class SimulatedRun
                 current = null;
                 return;
             }
-            if (run.Ended == null) return;
+            if (!run.OverBeforeUpdate) return;
 
             log("The simulated Run is over but the game has not restored the real farm (Leaderboard overlay inactive?); restoring it.");
             var real = __instance.storedSim;

@@ -23,7 +23,7 @@ public sealed partial class GameAdapter
         PatchSimulation("MainSim", "StartLeaderboard", warn, finalizer: nameof(SimulatedRun.StartLeaderboardEnd));
         PatchSimulation("Simulation", "RunNextStep", warn, prefix: nameof(SimulatedRun.BeforeStep));
         PatchSimulation("Simulation", "StopProgramExecution", warn, prefix: nameof(SimulatedRun.ProgramEnding));
-        PatchSimulation("MainSim", "Update", warn, postfix: nameof(SimulatedRun.AfterUpdate));
+        PatchSimulation("MainSim", "Update", warn, prefix: nameof(SimulatedRun.BeforeUpdate), postfix: nameof(SimulatedRun.AfterUpdate));
         PatchSimulation("MainSim", "RestoreMainSim", warn, postfix: nameof(SimulatedRun.Restored));
     }
 
