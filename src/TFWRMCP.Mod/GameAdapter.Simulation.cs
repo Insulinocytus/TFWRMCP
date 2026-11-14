@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Platforms;
@@ -28,7 +29,7 @@ public sealed partial class GameAdapter
     void PatchSimulation(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null) =>
         Patch(type, method, warn, prefix, postfix, finalizer, Capabilities.Simulation, typeof(SimulatedRun));
 
-    public async Task<SyntaxError?> StartSimulation(string name, double gameSeconds, CancellationToken cancel)
+    public async Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel)
     {
         var (error, started) = await MainThread.Run<(SyntaxError? Error, Task Started)>(() =>
         {
@@ -44,17 +45,46 @@ public sealed partial class GameAdapter
                 return (SyntaxErrorOf(window, parseError), Task.CompletedTask);
             }
 
-            // Everything simulate() would otherwise get from its arguments: this Save's Unlocks and items, no globals, a random seed.
-            var args = new MainSim.LeaderboardStartArgs(name, main.GetSerializedUnlocks(), main.GetInventory(),
-                new List<KeyValuePair<string, IPyObject>>(), "", "", LeaderboardType.simulation, true, EDlcType.None);
+            var args = new MainSim.LeaderboardStartArgs(name, OverrideUnlocks(main.GetSerializedUnlocks(), options.Unlocks),
+                OverrideItems(main.GetInventory(), options.Items), Globals(options.Globals), "", "", LeaderboardType.simulation, true,
+                EDlcType.None, options.Seed);
             main.Logger.Clear();
             main.ScheduleLeaderboardStart(args);
-            return ((SyntaxError?)null, SimulatedRun.Expect(name, gameSeconds));
+            return ((SyntaxError?)null, SimulatedRun.Expect(name, options.WarmupSeconds, options.GameSeconds));
         }, cancel);
 
         await started;
         return error;
     }
+
+    // The Save's serialized Unlocks are "name" for level 1 and "name_N" above it, as Farm's constructor reads them.
+    static string UnlockName(string serialized)
+    {
+        var underscore = serialized.LastIndexOf('_');
+        return underscore > 0 && int.TryParse(serialized.Substring(underscore + 1), out _) ? serialized.Substring(0, underscore) : serialized;
+    }
+
+    static List<string> OverrideUnlocks(List<string> serialized, IReadOnlyDictionary<string, int> levels)
+    {
+        var result = serialized.Where(s => !levels.ContainsKey(UnlockName(s))).ToList();
+        foreach (var (name, level) in levels)
+            if (level > 0) result.Add(level == 1 ? name : $"{name}_{level}");
+        return result;
+    }
+
+    static ItemBlock OverrideItems(ItemBlock items, IReadOnlyDictionary<string, double> amounts)
+    {
+        foreach (var (name, amount) in amounts) items.SetNumber(StringIds.GetItemId(name), amount);
+        return items;
+    }
+
+    static List<KeyValuePair<string, IPyObject>> Globals(IReadOnlyDictionary<string, object> globals) =>
+        globals.Select(g => new KeyValuePair<string, IPyObject>(g.Key, g.Value switch
+        {
+            bool flag => new PyBool(flag),
+            double number => new PyNumber(number),
+            _ => new PyString((string)g.Value),
+        })).ToList();
 
     public Task<TemporaryFarm?> ReadTemporaryFarm() => MainThread.Run<TemporaryFarm?>(() =>
     {

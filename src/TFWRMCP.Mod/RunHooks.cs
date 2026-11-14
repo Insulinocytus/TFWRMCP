@@ -194,14 +194,14 @@ public static class RunHooks
         }
     }
 
-    // Execution.ApplySideEffect(int droneId), prefix. Actions on the temporary farm of simulate() and Leaderboard Runs are not tracked.
+    // Execution.ApplySideEffect(int droneId), prefix. Of the temporary farms, only the simulated Run's own is tracked, not simulate()'s or a Leaderboard Run's.
     public static void ActionBegin(Execution __instance, int __0, out ActionState __state)
     {
         __state = default;
         try
         {
             var sim = __instance.sim;
-            if (sim.leaderboardType != LeaderboardType.none || !IsMainSim(sim)) return;
+            if (!IsMainSim(sim) || (sim.leaderboardType != LeaderboardType.none && SimulatedRun.Current?.Sim != sim)) return;
             var program = __instance.States[__0];
             var calls = ActionCalls(program.currentSideEffect);
             if (calls == null) return;

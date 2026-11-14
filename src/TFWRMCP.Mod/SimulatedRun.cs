@@ -16,32 +16,44 @@ public static class SimulatedRun
     // MainSim.TimeFactor's upper clamp: the game's top speed.
     const double TopSpeed = 1_000_000;
 
-    /// <summary>The simulated Run in progress: its temporary farm, the clock it ends at and, once its Script is over, how it ended.</summary>
+    /// <summary>The simulated Run in progress: its temporary farm, the clocks its warmup and the whole Run end at and, once its Script is over, how it ended.</summary>
     public sealed class Active
     {
         public Simulation Sim { get; }
+        public Duration Warmup { get; }
         public Duration Deadline { get; }
+
+        // 1 until WarmupEnded has been raised; 0 from the start when there is no warmup.
+        int warmupPending;
 
         // Taken when the temporary farm's program ends, emitted once the real farm is back.
         public volatile RunEnded? Ended;
 
-        public Active(Simulation sim, Duration deadline)
+        public Active(Simulation sim, Duration warmup, Duration deadline)
         {
             Sim = sim;
+            Warmup = warmup;
             Deadline = deadline;
+            warmupPending = warmup.nanoseconds > 0 ? 1 : 0;
         }
+
+        public bool WarmingUp => Volatile.Read(ref warmupPending) == 1;
+
+        public bool TryEndWarmup() => Interlocked.Exchange(ref warmupPending, 0) == 1;
     }
 
     sealed class Pending
     {
         public string Script { get; }
-        public double Seconds { get; }
+        public double WarmupSeconds { get; }
+        public double GameSeconds { get; }
         public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Pending(string script, double seconds)
+        public Pending(string script, double warmupSeconds, double gameSeconds)
         {
             Script = script;
-            Seconds = seconds;
+            WarmupSeconds = warmupSeconds;
+            GameSeconds = gameSeconds;
         }
     }
 
@@ -79,9 +91,9 @@ public static class SimulatedRun
     }
 
     /// <summary>Completes once the game has started the simulation (RunStarted raised) and fails when it could not.</summary>
-    public static Task Expect(string script, double seconds)
+    public static Task Expect(string script, double warmupSeconds, double gameSeconds)
     {
-        var pending = new Pending(script, seconds);
+        var pending = new Pending(script, warmupSeconds, gameSeconds);
         starting = pending;
         return pending.Started.Task;
     }
@@ -104,7 +116,8 @@ public static class SimulatedRun
 
             RunHooks.ConsumeEnd();
             __instance.TimeFactor = TopSpeed;
-            current = new Active(sim, Duration.FromSeconds(pending.Seconds));
+            current = new Active(sim, Duration.FromSeconds(pending.WarmupSeconds),
+                Duration.FromSeconds(pending.WarmupSeconds + pending.GameSeconds));
             emit(new RunStarted(pending.Script, GameAdapter.Items(sim.farm.Items, includeZero: true), simulated: true));
             pending.Started.TrySetResult(true);
         }
@@ -117,13 +130,19 @@ public static class SimulatedRun
     }
 
     // Simulation.RunNextStep(Duration goalTime, object lockSimulation, bool), prefix, on the simulation thread: the temporary
-    // farm never gets a goal past its deadline, and its Script is stopped as soon as the clock is there.
+    // farm never gets a goal past the end of its warmup (until that is reported) or its deadline, and its Script is stopped
+    // as soon as the clock is at the deadline.
     public static void BeforeStep(Simulation __instance, ref Duration __0, object __1)
     {
         var run = current;
         if (run == null || !ReferenceEquals(run.Sim, __instance)) return;
         try
         {
+            if (run.WarmingUp)
+            {
+                if (__instance.CurrentTime >= run.Warmup) EndWarmup(run, __instance);
+                else if (__0 > run.Warmup) __0 = run.Warmup;
+            }
             if (__0 > run.Deadline) __0 = run.Deadline;
             if (__instance.CurrentTime < run.Deadline || !__instance.IsExecuting()) return;
             lock (__1)
@@ -137,13 +156,20 @@ public static class SimulatedRun
         }
     }
 
-    // Simulation.StopProgramExecution(), prefix: the end of the temporary farm's Script, however it came about.
+    static void EndWarmup(Active run, Simulation sim)
+    {
+        if (run.TryEndWarmup()) emit(new WarmupEnded(GameAdapter.Items(sim.farm.Items, includeZero: true), sim.CurrentTime.Seconds));
+    }
+
+    // Simulation.StopProgramExecution(), prefix: the end of the temporary farm's Script, however it came about. A Script
+    // that ends during the warmup reports the warmup over first, so its summary is empty rather than the warmup's.
     public static void ProgramEnding(Simulation __instance)
     {
         var run = current;
         if (run == null || !ReferenceEquals(run.Sim, __instance) || run.Ended != null || !__instance.IsExecuting()) return;
         try
         {
+            EndWarmup(run, __instance);
             run.Ended = new RunEnded(RunHooks.ConsumeEnd(), GameAdapter.Items(__instance.farm.Items, includeZero: true),
                 (long)__instance.Execution.GlobalOpCount, __instance.CurrentTime.Seconds);
         }
