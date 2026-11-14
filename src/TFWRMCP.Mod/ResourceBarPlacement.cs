@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace TFWRMCP.Mod;
 
@@ -55,7 +56,6 @@ public sealed class ResourceBarPlacement : MonoBehaviour
             return;
         }
 
-        if (moved && bar.anchorMin == BottomCenter && bar.anchorMax == BottomCenter && bar.pivot == BottomCenter) return;
         if (!moved)
         {
             anchorMin = bar.anchorMin;
@@ -64,10 +64,12 @@ public sealed class ResourceBarPlacement : MonoBehaviour
             anchoredPosition = bar.anchoredPosition;
             sizeDelta = bar.sizeDelta;
             moved = true;
+            bar.anchorMin = bar.anchorMax = bar.pivot = BottomCenter;
+            bar.anchoredPosition = Vector2.zero;
+            bar.sizeDelta = bar.rect.size;
         }
-        var size = bar.rect.size;
-        bar.anchorMin = bar.anchorMax = bar.pivot = BottomCenter;
-        bar.anchoredPosition = Vector2.zero;
-        bar.sizeDelta = size;
+        // The bar is a fixed-width HorizontalLayoutGroup whose items overflow to the right; fit it to them to center them.
+        var width = LayoutUtility.GetPreferredWidth(bar);
+        if (!Mathf.Approximately(bar.sizeDelta.x, width)) bar.sizeDelta = new Vector2(width, bar.sizeDelta.y);
     }
 }
