@@ -26,6 +26,10 @@ The server only listens on localhost. Its settings are in the game's options men
 - **Don't open docs after an unlock**: stops the game from opening an Unlock's documentation when it is bought. On by default.
 - **Resource bar at bottom center**: anchors the resource bar at the bottom center of the screen and lets it grow
   from the middle; switching it off puts the bar back at the game's top left right away. On by default.
+- **Auto-arrange code windows**: whenever a Run starts or ends, or a Script joins the Run for the first time, the code
+  windows line up beside the farm: running and focused ones open at their content size in the left column, the rest
+  fold in the right column, each sorted by name, and glide into place. Windows you moved by hand are overwritten at the
+  next trigger; switching it off leaves them where they are. Docked windows are left alone. On by default.
 
 ## Tools
 
