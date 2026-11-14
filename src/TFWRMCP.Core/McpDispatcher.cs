@@ -35,8 +35,7 @@ public sealed class McpDispatcher
     int restarts;
 
     /// <summary>
-    /// Abandons the Tool in progress like F10 does, except that a Run keeps going (the server restarts); calls still
-    /// waiting their turn are dropped.
+    /// Abandons the Tool in progress (the server restarts; a Run keeps going); calls still waiting their turn are dropped.
     /// </summary>
     public void Interrupt()
     {
@@ -139,11 +138,9 @@ public sealed class McpDispatcher
                         "The game may have been updated; other tools are unaffected."));
             }
 
-            var (result, left) = await RunLocked(name, tool, args, epoch);
+            var (result, left) = await RunInterruptible(name, tool, args, epoch);
             abandoned = left;
-            if (abandoned != null)
-                throw new ToolException("Interrupted by the user: the human pressed F10 and took back control. " +
-                    "Any Run in progress was stopped (status stopped_by_user); the Tool's effects may be incomplete.");
+            if (abandoned != null) throw new ToolException("Dropped: the MCP server was restarted.");
             return Ok(id, ToolResult(false, JToken.FromObject(result ?? new JObject(), Serializer).ToString(Formatting.None)));
         }
         catch (ToolException e)
@@ -164,47 +161,31 @@ public sealed class McpDispatcher
     }
 
     /// <summary>
-    /// Runs the Tool under the Input Lock. F10 cancels it, stops the Run and abandons it (the game has released the lock
-    /// by then); the returned task completes once the abandoned work has stopped.
+    /// Runs the Tool until it returns or <see cref="Interrupt"/> cancels and abandons it; the returned task completes
+    /// once the abandoned work has stopped.
     /// </summary>
-    async Task<(object? Result, Task? Abandoned)> RunLocked(string name, Tool tool, JObject args, int epoch)
+    async Task<(object? Result, Task? Abandoned)> RunInterruptible(string name, Tool tool, JObject args, int epoch)
     {
         var cancel = new CancellationTokenSource();
         var stop = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnTakeover()
+        void OnInterrupt()
         {
             stop.TrySetResult(true);
             cancel.Cancel();
         }
-        void OnInterrupt()
-        {
-            stop.TrySetResult(false);
-            cancel.Cancel();
-        }
-        game.UserTookOver += OnTakeover;
         Interrupted += OnInterrupt;
         try
         {
             // Subscribed first, so a restart either shows here or interrupts the work below.
             if (epoch != Volatile.Read(ref restarts)) throw new ToolException("Dropped: the MCP server was restarted.");
-            await game.SetInputLock(name);
             var work = Work(cancel.Token);
             await Task.WhenAny(work, stop.Task);
             if (!stop.Task.IsCompleted) return (await work, null);
-
-            var settled = Settle(work);
-            if (await stop.Task)
-            {
-                try { await game.StopRun(); }
-                catch (Exception e) { log($"Stopping the Run after the user interrupted '{name}' failed: {e}"); }
-            }
-            return (null, settled);
+            return (null, Settle(work));
         }
         finally
         {
-            game.UserTookOver -= OnTakeover;
             Interrupted -= OnInterrupt;
-            await game.SetInputLock(null);
         }
 
         async Task<object?> Work(CancellationToken token)
@@ -217,7 +198,7 @@ public sealed class McpDispatcher
         {
             try { await work; }
             catch (OperationCanceledException) { }
-            catch (Exception e) { log($"Tool '{name}' failed after the user interrupted it: {e}"); }
+            catch (Exception e) { log($"Tool '{name}' failed after it was interrupted: {e}"); }
         }
     }
 

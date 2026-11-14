@@ -4,5 +4,5 @@
 
 ## 考虑过的方案
 
-- **Fork 或直接使用 Kalteew/the-farmer-was-replaced-mcp**：否决。它依赖按键模拟和截屏兜底，仓库里混有作者个人的存档进度，也没有 Input Lock。其调用游戏 API 的方式仍可作为参考。
+- **Fork 或直接使用 Kalteew/the-farmer-was-replaced-mcp**：否决。它依赖按键模拟和截屏兜底，仓库里混有作者个人的存档进度。其调用游戏 API 的方式仍可作为参考。
 - **游戏桥接 + 外部 Node/Python stdio MCP 服务**：否决。两个产物、两种语言，还多一层协议。

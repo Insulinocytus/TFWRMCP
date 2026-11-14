@@ -21,7 +21,7 @@ The server only listens on localhost. Its settings are in the game's options men
 
 - **Port**: saved right away, used after the next restart.
 - **MCP server**: shows whether the server is listening; **Restart** listens again on the configured port. A tool
-  call in progress is dropped and the Input Lock released, but a Run keeps going. If the port is taken, the server
+  call in progress is dropped, but a Run keeps going. If the port is taken, the server
   stays stopped and the reason shows here; the game itself runs normally.
 - **Don't open docs after an unlock**: stops the game from opening an Unlock's documentation when it is bought. On by default.
 - **Don't open Getting Started on a new save**: stops the game from opening the Getting Started docs when a Save that
@@ -92,14 +92,6 @@ a page. Page ids come in two kinds: `unlocks/<name>`, `functions/<name>`, `items
 `grounds/<name>` are generated from the game's texts (`unlocks/<name>` shows the effect and the next level's cost),
 while `docs/....md` are tutorial pages whose names need not match an Unlock (the tutorial for `loops` is
 `docs/scripting/while.md`). Take ids from `list_docs` rather than building them.
-
-## Input Lock
-
-While a tool call runs, the game ignores your mouse, keyboard, hotkeys and scroll wheel, and a lock icon shows in
-the bottom-right corner (hover it to see the running tool). Input comes back as soon as the call returns, even if a
-Run is still going. Press **F10** during the lock to take control back: the Run is stopped (`stopped_by_user`) and the
-tool call returns "Interrupted by the user". F10 is reserved for this; if one of your key bindings uses it, the mod
-logs a warning at startup.
 
 ## Unlock notices
 

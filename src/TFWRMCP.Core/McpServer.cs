@@ -32,7 +32,7 @@ public sealed class McpServer : IDisposable
     }
 
     /// <summary>
-    /// Drops every open request, interrupts the Tool in progress (the Input Lock is released; a Run keeps going) and
+    /// Drops every open request, interrupts the Tool in progress (a Run keeps going) and
     /// listens on the port again. Throws when the port cannot be bound, leaving the server stopped.
     /// </summary>
     public void Restart(int port)

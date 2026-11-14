@@ -63,10 +63,9 @@ public sealed partial class GameAdapter : IGame
     /// Resolves every reflection target up front, by type name so that a renamed game type degrades only the dependent
     /// Tools instead of failing the Mod's startup; failures are logged.
     /// </summary>
-    public GameAdapter(Action<string> warn, Action<string> info, InputLock inputLock)
+    public GameAdapter(Action<string> warn, Action<string> info)
     {
         this.info = info;
-        this.inputLock = inputLock;
         simField = Resolve(Capabilities.State, Field("MainSim", "sim"), "MainSim.sim", warn);
         lockField = Resolve(Capabilities.State, Field("MainSim", "lockSimulation"), "MainSim.lockSimulation", warn);
 

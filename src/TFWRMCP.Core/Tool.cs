@@ -15,7 +15,7 @@ public sealed class Tool
     public string[] Capabilities { get; }
 
     /// <summary>
-    /// Receives the call arguments and a token that is cancelled when the human takes over (F10); the returned object
+    /// Receives the call arguments and a token that is cancelled when the MCP server restarts; the returned object
     /// is serialized as the result text. A handler must stop promptly once cancelled and not start anything new.
     /// </summary>
     public Func<JObject, CancellationToken, Task<object?>> Handler { get; }

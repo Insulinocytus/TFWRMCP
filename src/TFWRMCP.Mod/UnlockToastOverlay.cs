@@ -16,6 +16,9 @@ public sealed class UnlockToastOverlay : MonoBehaviour
     const float Gap = 6;
     const float Width = 420;
 
+    static readonly Color Background = new(0f, 0f, 0f, 0.7f);
+    static readonly Color Glyph = new(1f, 0.8f, 0.2f);
+
     static readonly UnlockToasts Toasts = new();
     static Plugin plugin = null!;
 
@@ -58,16 +61,61 @@ public sealed class UnlockToastOverlay : MonoBehaviour
 
     void Awake()
     {
-        canvas = InputLock.OverlayCanvas("TFWRMCP Unlock Toasts", short.MaxValue - 1);
+        canvas = OverlayCanvas("TFWRMCP Unlock Toasts", short.MaxValue - 1);
         for (var i = 0; i < UnlockToasts.Max; i++)
         {
-            var box = InputLock.Box("Toast" + i, canvas.transform, InputLock.Background, Vector2.zero,
+            var box = Box("Toast" + i, canvas.transform, Background, Vector2.zero,
                 new Vector2(Margin, Margin + i * (Height + Gap)), new Vector2(Width, Height));
             slots[i] = box.gameObject.AddComponent<CanvasGroup>();
             slots[i].blocksRaycasts = false;
-            texts[i] = InputLock.Label(box);
-            texts[i].color = InputLock.Glyph;
+            texts[i] = Label(box);
+            texts[i].color = Glyph;
         }
+    }
+
+    /// <summary>A screen overlay canvas of the Mod's own that survives scene reloads and the game's "hide UI".</summary>
+    static GameObject OverlayCanvas(string name, int sortingOrder)
+    {
+        var canvas = new GameObject(name);
+        DontDestroyOnLoad(canvas);
+        var root = canvas.AddComponent<Canvas>();
+        root.renderMode = RenderMode.ScreenSpaceOverlay;
+        root.sortingOrder = sortingOrder;
+        var scaler = canvas.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920, 1080);
+        scaler.matchWidthOrHeight = 0.5f;
+        return canvas;
+    }
+
+    static RectTransform Box(string name, Transform parent, Color color, Vector2 anchor, Vector2 position, Vector2 size)
+    {
+        var rect = new GameObject(name, typeof(RectTransform)).GetComponent<RectTransform>();
+        rect.SetParent(parent, false);
+        rect.anchorMin = rect.anchorMax = rect.pivot = anchor;
+        rect.anchoredPosition = position;
+        rect.sizeDelta = size;
+        var image = rect.gameObject.AddComponent<Image>();
+        image.color = color;
+        image.raycastTarget = false;
+        return rect;
+    }
+
+    /// <summary>Left-aligned text filling the box.</summary>
+    static Text Label(RectTransform box)
+    {
+        var rect = new GameObject("Text", typeof(RectTransform)).GetComponent<RectTransform>();
+        rect.SetParent(box, false);
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = new Vector2(12, 0);
+        rect.offsetMax = new Vector2(-12, 0);
+        var text = rect.gameObject.AddComponent<Text>();
+        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        text.fontSize = 18;
+        text.alignment = TextAnchor.MiddleLeft;
+        text.raycastTarget = false;
+        return text;
     }
 
     void Update()

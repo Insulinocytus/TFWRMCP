@@ -43,7 +43,7 @@ public class RestartTests
     }
 
     [Fact]
-    public async Task A_restart_during_a_Tool_drops_the_request_and_releases_the_Input_Lock_but_keeps_the_Run_going()
+    public async Task A_restart_during_a_Tool_drops_the_request_but_keeps_the_Run_going()
     {
         var game = new FakeGame();
         game.Scripts["main"] = "while True: pass";
@@ -54,8 +54,6 @@ public class RestartTests
         s.Restart();
 
         await Assert.ThrowsAsync<HttpRequestException>(() => call);
-        for (var i = 0; i < 200 && game.LockedBy != null; i++) await Task.Delay(10);
-        Assert.Null(game.LockedBy);
         Assert.True(game.RunActive);
     }
 
@@ -63,17 +61,19 @@ public class RestartTests
     public async Task After_a_restart_the_next_Tool_still_waits_for_the_interrupted_one()
     {
         var game = new FakeGame();
+        var started = new TaskCompletionSource<bool>();
         var release = new TaskCompletionSource<bool>();
         var slow = new Tool("slow", "Ignores everything.", new JObject { ["type"] = "object" },
             async (_, _) =>
             {
+                started.SetResult(true);
                 await release.Task;
                 return "done";
             });
         using var s = new TestServer(game, slow);
 
         var interrupted = s.Call("slow");
-        await game.WaitForLock("slow");
+        await started.Task;
         s.Restart();
         await Assert.ThrowsAsync<HttpRequestException>(() => interrupted);
         var next = s.Call("get_state");
@@ -91,17 +91,19 @@ public class RestartTests
     public async Task A_call_queued_behind_the_interrupted_Tool_is_dropped_by_the_restart_and_never_runs()
     {
         var game = new FakeGame();
+        var started = new TaskCompletionSource<bool>();
         var release = new TaskCompletionSource<bool>();
         var slow = new Tool("slow", "Ignores everything.", new JObject { ["type"] = "object" },
             async (_, _) =>
             {
+                started.SetResult(true);
                 await release.Task;
                 return "done";
             });
         using var s = new TestServer(game, slow);
 
         var interrupted = s.Call("slow");
-        await game.WaitForLock("slow");
+        await started.Task;
         var queued = s.Call("get_state");
         await Task.Delay(200);
         s.Restart();
@@ -111,6 +113,5 @@ public class RestartTests
         await Task.Delay(300);
 
         Assert.Equal(0, game.Calls);
-        Assert.DoesNotContain("lock:get_state", game.LockEvents);
     }
 }

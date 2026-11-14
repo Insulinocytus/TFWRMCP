@@ -42,7 +42,7 @@ public sealed class Plugin : BaseUnityPlugin
         AutoCenterCamera = Config.Bind("Layout", "AutoCenterCamera", true,
             "Keep the farm at the center of the screen and zoom so that the farm and all code windows fit, gliding to the new view whenever the farm or the windows change.");
 
-        var game = new GameAdapter(Logger.LogWarning, Logger.LogInfo, gameObject.AddComponent<InputLock>());
+        var game = new GameAdapter(Logger.LogWarning, Logger.LogInfo);
         server = new McpServer(game, Tools.Create(game, Logger.LogError), Port.Value, Logger.LogError);
         Listen(server.Start, Port.Value);
 
@@ -77,8 +77,6 @@ public sealed class Plugin : BaseUnityPlugin
             Logger.LogError($"MCP disabled: cannot listen on 127.0.0.1:{on} ({e.Message}). Change the port in the game's MCP options and restart the server.");
         }
     }
-
-    void Start() => InputLock.WarnAboutF10Bindings(Logger.LogWarning);
 
     void Update() => MainThread.Drain();
 

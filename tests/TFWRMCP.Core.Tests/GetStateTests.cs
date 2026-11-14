@@ -269,8 +269,6 @@ public class GetStateTests
         public double GameSeconds => 0;
         public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot) => throw new NotSupportedException();
         public Task<UnlockTree> GetUnlockTree() => throw new NotSupportedException();
-        public Task SetInputLock(string? tool) => Task.CompletedTask;
-        public event Action UserTookOver { add { } remove { } }
         public Task<string> ReadDoc(string page) => throw new NotSupportedException();
         public Task<IReadOnlyList<DocLink>> ListDocs(bool includeLocked) => throw new NotSupportedException();
         public Task<BuiltinList> ListBuiltins() => throw new NotSupportedException();

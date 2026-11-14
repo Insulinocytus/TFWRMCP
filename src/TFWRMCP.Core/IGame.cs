@@ -126,19 +126,6 @@ public interface IGame
     /// </summary>
     Task<UnlockTree> GetUnlockTree();
 
-    /// <summary>
-    /// Starts (<paramref name="tool"/> is the running Tool's name) or ends (null) the Input Lock: while it lasts the
-    /// game ignores every human input except F10 and shows the lock icon. Idempotent, and must also hold across a
-    /// scene reload.
-    /// </summary>
-    Task SetInputLock(string? tool);
-
-    /// <summary>
-    /// The human pressed F10 during an Input Lock. The game has already released the lock by the time this is raised
-    /// (from any thread, never blocking); Core stops the Run and abandons the Tool in progress.
-    /// </summary>
-    event Action UserTookOver;
-
     /// <summary>The page as the game's docs window shows it (placeholder for locked content); throws ToolException if there is no such page.</summary>
     Task<string> ReadDoc(string page);
 

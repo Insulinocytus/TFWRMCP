@@ -32,10 +32,6 @@ _避免_: 运行中的文件、活动窗口
 由 `leaderboard_run()` 在临时农场上发起的计时 Run，其结果会提交到 Steam 排行榜。
 _避免_: Benchmark、排位赛
 
-**Input Lock**:
-因 Tool 正在执行而使游戏拒绝人类输入的状态。
-_避免_: 冻结、暂停
-
 **Save**:
 保存物品、Unlock 和 Script 的游戏存档；同一时间只有一个处于激活状态。
 _避免_: 槽位、Profile、世界

@@ -11,9 +11,9 @@ namespace TFWRMCP.Mod;
 /// swapped for a temporary one, a window moved), the workspace's pan and zoom glide there over a second. The zoom is applied
 /// the way <c>Workspace.Zoom</c> applies it. The player's own camera operations (WASD, scroll zoom off the windows, drag pan,
 /// the game's jump to a window for an error or a search)
-/// take the camera from the Mod, see <see cref="CameraTakeover"/>. They are noticed in the game's input code, which does not
-/// run during the Input Lock, while the rest of this keeps working. A game member that is missing or not what it is assumed to
-/// be turns the feature off, or only the noticing of the operations it belongs to.
+/// take the camera from the Mod, see <see cref="CameraTakeover"/>. They are noticed in the game's input code. A game member
+/// that is missing or not what it is assumed to be turns the feature off, or only the noticing of the operations it
+/// belongs to.
 /// </summary>
 public sealed class CameraAutoCenter : MonoBehaviour
 {

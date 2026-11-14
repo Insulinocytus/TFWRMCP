@@ -81,7 +81,7 @@ public enum RunEnd
     /// <summary>The Script ran to its end.</summary>
     Terminated,
 
-    /// <summary>Something stopped the Run: the stop button, F10, editing the code, or <see cref="IGame.StopRun"/>.</summary>
+    /// <summary>Something stopped the Run: the stop button, editing the code, or <see cref="IGame.StopRun"/>.</summary>
     Stopped,
 }
 
