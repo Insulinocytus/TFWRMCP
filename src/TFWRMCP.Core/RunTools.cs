@@ -45,6 +45,31 @@ public static partial class Tools
         "stops the Run. To measure production: stop_after_seconds=60, timeout_seconds=0, then wait_run until the " +
         "Run has ended and read rates.";
 
+    const string StopOnFailuresDescription =
+        "Stop the Run (like stop_run) when a function keeps failing, instead of letting a stuck Script burn game " +
+        "time. An object; pass {} for the defaults. For every function not in ignore the game clock's last 10 " +
+        "seconds (the clock get_time() reads) are checked: once it was called at least min_calls times (default " +
+        "100) in that window and more than ratio (a number in (0, 1], default 0.5) of those calls failed (a failed " +
+        "call is one that failed_calls counts), the Run is stopped. A ratio exactly reached does not stop it. " +
+        "Functions are judged separately, so a stuck move is caught even while harvest succeeds; put functions " +
+        "your Script fails on purpose in ignore (a list of function names, e.g. [\"harvest\"]). The result then " +
+        "has status stopped_by_tool and failing (function name to its failed calls in the window), listing every " +
+        "function that met the condition then; a Run that ends any other way has no failing. The rule belongs to " +
+        "the Run, not to this call: it keeps working after the call returned 'running' and ends with the Run. " +
+        "Combined with stop_after_seconds, until_inventory and stop_when_met, whichever happens first stops the " +
+        "Run. Only Runs started by this call are watched, never the human's. Not set: no rule.";
+
+    static JObject StopOnFailuresSchema() => new()
+    {
+        ["properties"] = new JObject
+        {
+            ["ratio"] = new JObject { ["type"] = "number", ["exclusiveMinimum"] = 0, ["maximum"] = 1 },
+            ["min_calls"] = new JObject { ["type"] = "integer", ["minimum"] = 1 },
+            ["ignore"] = new JObject { ["type"] = "array", ["items"] = new JObject { ["type"] = "string" } },
+        },
+        ["additionalProperties"] = false,
+    };
+
     const string UntilInventoryDescription =
         "Item name to amount, e.g. {\"carrot\": 600}: the inventory must hold at least that much of every listed " +
         "item. The wait then also ends as soon as this holds (or the Run ends, or the timeout passes), and the " +
@@ -107,18 +132,63 @@ public static partial class Tools
     {
         var token = args["stop_after_seconds"];
         if (token == null || token.Type == JTokenType.Null) return null;
-        if (game.UnavailableReason(Capabilities.State) is { } reason)
-            throw new ToolException($"'stop_after_seconds' is unavailable: capability '{Capabilities.State}' failed to " +
-                $"resolve ({reason}).");
+        RequireGameClock(game, "stop_after_seconds");
         if (token.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)token > 0))
             throw new ToolException("'stop_after_seconds' must be a number greater than 0.");
         return (double)token;
     }
 
-    static async Task<RunSnapshot> StartAndWait(IGame game, RunTracker runs, string name, TimeSpan timeout,
-        InventoryGoal? goal, CancellationToken cancel, double? stopAfterSeconds = null)
+    static void RequireGameClock(IGame game, string parameter)
     {
-        var syntaxError = await game.StartRun(name, cancel);
+        if (game.UnavailableReason(Capabilities.State) is { } reason)
+            throw new ToolException($"'{parameter}' is unavailable: capability '{Capabilities.State}' failed to " +
+                $"resolve ({reason}).");
+    }
+
+    static FailureRule? StopOnFailures(JObject args, IGame game)
+    {
+        var token = args["stop_on_failures"];
+        if (token == null || token.Type == JTokenType.Null) return null;
+        RequireGameClock(game, "stop_on_failures");
+        if (token is not JObject rule)
+            throw new ToolException("'stop_on_failures' must be an object: {\"ratio\": 0.5, \"min_calls\": 100, \"ignore\": [\"move\"]}.");
+        var unknown = rule.Properties().FirstOrDefault(p => p.Name is not ("ratio" or "min_calls" or "ignore"));
+        if (unknown != null)
+            throw new ToolException($"Unknown key '{unknown.Name}' in 'stop_on_failures'. Keys: ratio, min_calls, ignore.");
+
+        var ratio = 0.5;
+        if (rule["ratio"] is { Type: not JTokenType.Null } ratioToken)
+        {
+            if (ratioToken.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)ratioToken > 0 && (double)ratioToken <= 1))
+                throw new ToolException("'stop_on_failures.ratio' must be a number greater than 0 and at most 1.");
+            ratio = (double)ratioToken;
+        }
+
+        var minCalls = 100;
+        if (rule["min_calls"] is { Type: not JTokenType.Null } minCallsToken)
+        {
+            if (minCallsToken is not JValue { Type: JTokenType.Integer, Value: long count and >= 1 and <= int.MaxValue })
+                throw new ToolException("'stop_on_failures.min_calls' must be a positive integer.");
+            minCalls = (int)count;
+        }
+
+        var ignore = new HashSet<string>();
+        if (rule["ignore"] is { Type: not JTokenType.Null } ignoreToken)
+        {
+            if (ignoreToken is not JArray names || names.Any(n => n.Type != JTokenType.String))
+                throw new ToolException("'stop_on_failures.ignore' must be an array of function names.");
+            ignore.UnionWith(names.Select(n => (string)n!));
+        }
+        return new FailureRule(ratio, minCalls, ignore);
+    }
+
+    static async Task<RunSnapshot> StartAndWait(IGame game, RunTracker runs, string name, TimeSpan timeout,
+        InventoryGoal? goal, CancellationToken cancel, double? stopAfterSeconds = null, FailureRule? stopOnFailures = null)
+    {
+        runs.StopOnFailuresInNextRun(stopOnFailures);
+        SyntaxError? syntaxError;
+        try { syntaxError = await game.StartRun(name, cancel); }
+        finally { runs.StopOnFailuresInNextRun(null); }
         if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
         else if (stopAfterSeconds is { } seconds) runs.StopAfterGameSeconds(seconds);
         return await runs.Wait(timeout, cancel, goal);
@@ -150,15 +220,17 @@ public static partial class Tools
             "stop_current). Returns {name, created}; with stop_current and a Run in progress also stopped (the " +
             "stopped Run, as stop_run returns it); with run also run (the Run, as run_script returns it; parse_error " +
             "on a syntax error, the Script is still written). Use stop_current and run together to replace and " +
-            "rerun a running Script in one call.",
-            WaitSchema(
+            "rerun a running Script in one call. With run, stop_on_failures protects the Run as in run_script.",
+            WithSchema(WaitSchema(
                 ("name", "string", "Script name.", true),
                 ("code", "string", "Full source code of the Script.", true),
                 ("stop_current", "boolean", "Before writing, stop the Run in progress (like stop_run), whoever " +
                     "started it. Default false.", false),
                 ("run", "boolean", "After writing, run the Script (like run_script; timeout_seconds, " +
-                    "until_inventory and stop_when_met apply as there). With a Run in progress this needs " +
-                    "stop_current, otherwise the call fails and writes nothing. Default false.", false)),
+                    "until_inventory, stop_when_met and stop_on_failures apply as there). With a Run in progress this needs " +
+                    "stop_current, otherwise the call fails and writes nothing. Default false.", false),
+                ("stop_on_failures", "object", StopOnFailuresDescription + " Needs run.", false)),
+                "stop_on_failures", StopOnFailuresSchema()),
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
@@ -169,13 +241,15 @@ public static partial class Tools
                     throw new ToolException($"'stop_current' and 'run' are unavailable: capability '{Capabilities.Run}' " +
                         $"failed to resolve ({reason}).");
                 var (timeout, goal) = run ? await WaitArgs(args, game) : default;
+                var failureRule = StopOnFailures(args, game);
+                if (failureRule != null && !run) throw new ToolException("'stop_on_failures' needs 'run'.");
                 if (run && !stopCurrent && runs.InProgress)
                     throw new ToolException("A Run is in progress; pass stop_current to stop it first. Nothing was written.");
 
                 var result = new Dictionary<string, object?> { ["name"] = name };
                 if (stopCurrent && runs.InProgress) result["stopped"] = await runs.StopByTool(StopTimeout, cancel);
                 result["created"] = await game.WriteScript(name, code);
-                if (run) result["run"] = await StartAndWait(game, runs, name, timeout, goal, cancel);
+                if (run) result["run"] = await StartAndWait(game, runs, name, timeout, goal, cancel, stopOnFailures: failureRule);
                 return result;
             },
             Capabilities.Scripts),
@@ -202,17 +276,20 @@ public static partial class Tools
             "rank or null without Steam). A runtime error stops the Run automatically. The Leaderboard result page " +
             "is closed automatically. To run until the inventory reaches a target, pass until_inventory (and " +
             "stop_when_met to stop the Run then) instead of polling get_state; to run for a fixed game time, pass " +
-            "stop_after_seconds. The Run also carries a summary: " +
+            "stop_after_seconds; to stop a Run that keeps failing calls, pass stop_on_failures. The Run also carries a summary: " +
             RunSummaryDescription,
-            WaitSchema(
+            WithSchema(WaitSchema(
                 ("name", "string", "Script name (case-sensitive).", true),
-                ("stop_after_seconds", "number", StopAfterSecondsDescription, false)),
+                ("stop_after_seconds", "number", StopAfterSecondsDescription, false),
+                ("stop_on_failures", "object", StopOnFailuresDescription, false)),
+                "stop_on_failures", StopOnFailuresSchema()),
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
                 var stopAfterSeconds = StopAfterSeconds(args, game);
+                var stopOnFailures = StopOnFailures(args, game);
                 var (timeout, goal) = await WaitArgs(args, game);
-                return await StartAndWait(game, runs, name, timeout, goal, cancel, stopAfterSeconds);
+                return await StartAndWait(game, runs, name, timeout, goal, cancel, stopAfterSeconds, stopOnFailures);
             },
             Capabilities.Run),
         new Tool(
@@ -272,6 +349,8 @@ public static partial class Tools
             WaitSchema(),
             async (args, cancel) =>
             {
+                if (args.ContainsKey("stop_on_failures"))
+                    throw new ToolException("'stop_on_failures' is fixed when the Run starts: pass it to run_script or write_script, not wait_run.");
                 if (!runs.HasRun) throw new ToolException("No Run has been started yet.");
                 var (timeout, goal) = await WaitArgs(args, game);
                 if (goal != null && runs.IsSimulated)

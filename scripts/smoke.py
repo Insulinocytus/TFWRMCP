@@ -580,6 +580,32 @@ def check_run_summary(mcp):
     print(f"    game_seconds {run['game_seconds']}, rates {run['rates']}")
 
 
+def check_stop_on_failures(mcp):
+    tools = {t["name"]: t for t in mcp.rpc("tools/list")["tools"]}
+    assert "stop_on_failures" in tools["run_script"]["inputSchema"]["properties"], tools["run_script"]
+    assert "stop_on_failures" not in tools["wait_run"]["inputSchema"]["properties"], tools["wait_run"]
+    fails(mcp, "run_script", "stop_on_failures", name="smoke_run", stop_on_failures={"ratio": 0})
+    assert ok(mcp, "get_state")["run"]["status"] != "running"
+
+    # Planting on an occupied tile fails every time after the first: a Script stuck on it is stopped by the rule.
+    ok(mcp, "write_script", name="smoke_stuck", code="while True:\n    plant(Entities.Bush)\n")
+    run = ok(mcp, "run_script", name="smoke_stuck", timeout_seconds=0, stop_on_failures={"min_calls": 5})
+    assert run["status"] == "running", run
+    fails(mcp, "wait_run", "stop_on_failures", stop_on_failures={})
+    run = ok(mcp, "wait_run", timeout_seconds=90)
+    assert run["status"] == "stopped_by_tool" and 3 <= run["failing"]["plant"] <= run["failed_calls"]["plant"], run
+    print(f"    failing {run['failing']} after {run['game_seconds']} game seconds")
+
+    # An ignored function does not take part, and a Run that ends another way has no failing; the rule is not inherited.
+    ok(mcp, "run_script", name="smoke_stuck", timeout_seconds=0, stop_after_seconds=12,
+       stop_on_failures={"min_calls": 5, "ignore": ["plant"]})
+    run = ok(mcp, "wait_run", timeout_seconds=60)
+    assert run["status"] == "stopped_by_tool" and "failing" not in run and run["failed_calls"]["plant"] >= 5, run
+    ok(mcp, "run_script", name="smoke_stuck", timeout_seconds=0, stop_after_seconds=12)
+    run = ok(mcp, "wait_run", timeout_seconds=60)
+    assert run["status"] == "stopped_by_tool" and "failing" not in run, run
+
+
 def check_get_state_during_simulate(mcp):
     # The real farm differs from simulate()'s temporary one (1x1, drone at (0,0)): a bush under the drone, the test
     # Save's Unlocks, the world grown by expand.
@@ -697,6 +723,7 @@ CHECKS = [
     check_scripts, check_list_builtins, check_grant_unlocks, check_unlock_batch_and_costs, check_run_finishes,
     check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
     check_leaderboard_run, check_get_state_fields, check_until_inventory, check_tile_fields, check_run_summary,
+    check_stop_on_failures,
     check_get_state_during_simulate, check_simulate_script, check_save_switch_ends_run,
 ]
 
