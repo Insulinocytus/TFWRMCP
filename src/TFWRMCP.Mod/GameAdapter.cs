@@ -19,6 +19,7 @@ public sealed partial class GameAdapter : IGame
 
     readonly Dictionary<string, string> unavailable = new();
     FieldInfo? simField;
+    AccessTools.FieldRef<MainSim, Simulation>? simRef;
     FieldInfo? lockField;
 
     // Set by LoadSave; Unity null semantics make it read as null once the old scene is destroyed, until then GetScene reports Loading.
@@ -46,14 +47,17 @@ public sealed partial class GameAdapter : IGame
         }
     }
 
-    /// <summary>Read like <see cref="RunTicks"/>: Duration is one aligned 8-byte field, so at worst a step old.</summary>
+    /// <summary>
+    /// Read like <see cref="RunTicks"/>: Duration is one aligned 8-byte field, so at worst a step old. The Run's failure
+    /// rule reads it on the simulation thread for every action call, hence the compiled field access instead of reflection.
+    /// </summary>
     public double GameSeconds
     {
         get
         {
             var main = MainSim.Inst;
-            if ((object)main == null || simField == null) return 0;
-            var sim = main.storedSim ?? (Simulation?)simField.GetValue(main);
+            if ((object)main == null || simRef == null) return 0;
+            var sim = main.storedSim ?? simRef(main);
             return sim == null ? 0 : sim.CurrentTime.Seconds;
         }
     }
@@ -68,6 +72,7 @@ public sealed partial class GameAdapter : IGame
     {
         this.info = info;
         simField = Resolve(Capabilities.State, Field("MainSim", "sim"), "MainSim.sim", warn);
+        if (simField != null) simRef = AccessTools.FieldRefAccess<MainSim, Simulation>(simField);
         lockField = Resolve(Capabilities.State, Field("MainSim", "lockSimulation"), "MainSim.lockSimulation", warn);
 
         ResolveMethods(Capabilities.Saves, warn,
@@ -221,6 +226,15 @@ public sealed partial class GameAdapter : IGame
 
     public Task<string> ReadScript(string name) => MainThread.Run(() => FindScript(name).CodeInput.text);
 
+    public Task<SyntaxError?> ParseScript(string name) => MainThread.Run(() => ParseError(FindScript(name), name));
+
+    SyntaxError? ParseError(CodeWindow window, string name)
+    {
+        if (window.Parse() != null) return null;
+        if (parseExceptionField!.GetValue(window) is not ParseException error) throw new ToolException($"The game did not parse '{name}'.");
+        return SyntaxErrorOf(window, error);
+    }
+
     public async Task<bool> WriteScript(string name, string code)
     {
         var created = await MainThread.Run(() =>
@@ -275,7 +289,9 @@ public sealed partial class GameAdapter : IGame
         if (main.IsExecuting())
             throw new ToolException("A Run is already in progress; use wait_run to wait for it or stop_run to stop it.");
 
-        window.PressExecuteOrStop();
+        RunHooks.StartingForTool = true;
+        try { window.PressExecuteOrStop(); }
+        finally { RunHooks.StartingForTool = false; }
         if (main.IsExecuting()) return null;
 
         if (parseExceptionField!.GetValue(window) is not ParseException error)

@@ -102,7 +102,7 @@ public static partial class Tools
         var atLeast = new Dictionary<string, double>();
         foreach (var item in items.Properties())
         {
-            if (item.Value.Type is not (JTokenType.Integer or JTokenType.Float) || (double)item.Value < 0)
+            if (!IsNumber(item.Value) || (double)item.Value < 0)
                 throw new ToolException($"'until_inventory' amount for '{item.Name}' must be a number that is not negative.");
             atLeast[item.Name] = (double)item.Value;
         }
@@ -122,7 +122,7 @@ public static partial class Tools
     {
         var token = args["timeout_seconds"];
         if (token == null || token.Type == JTokenType.Null) return TimeSpan.FromSeconds(DefaultTimeoutSeconds);
-        if (token.Type is not (JTokenType.Integer or JTokenType.Float))
+        if (!IsNumber(token))
             throw new ToolException("'timeout_seconds' must be a number.");
         var seconds = (double)token;
         if (double.IsNaN(seconds) || seconds < 0) throw new ToolException("'timeout_seconds' must not be negative.");
@@ -134,7 +134,7 @@ public static partial class Tools
         var token = args["stop_after_seconds"];
         if (token == null || token.Type == JTokenType.Null) return null;
         RequireGameClock(game, "stop_after_seconds");
-        if (token.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)token > 0))
+        if (!IsNumber(token) || !((double)token > 0))
             throw new ToolException("'stop_after_seconds' must be a number greater than 0.");
         return (double)token;
     }
@@ -160,7 +160,7 @@ public static partial class Tools
         var ratio = 0.5;
         if (rule["ratio"] is { Type: not JTokenType.Null } ratioToken)
         {
-            if (ratioToken.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)ratioToken > 0 && (double)ratioToken <= 1))
+            if (!IsNumber(ratioToken) || !((double)ratioToken > 0 && (double)ratioToken <= 1))
                 throw new ToolException("'stop_on_failures.ratio' must be a number greater than 0 and at most 1.");
             ratio = (double)ratioToken;
         }
@@ -298,17 +298,19 @@ public static partial class Tools
             "Runs a Script as a simulated Run on a temporary farm that starts with this Save's Unlocks and items " +
             "(each overridable with unlocks and items, entry by entry), at the game's top speed, and waits for it " +
             "to end. The temporary farm is thrown away afterwards, so the Save, the real farm's items and the real " +
-            "farm's clock stay as they were. The real farm is completely paused for as long as the simulation " +
-            "runs: nothing grows or accumulates there meanwhile, so count the simulation's real duration (it " +
+            "farm's clock stay as they were. The real farm is completely paused for as long as the simulated Run " +
+            "runs: nothing grows or accumulates there meanwhile, so count the simulated Run's real duration (it " +
             "depends on your CPU; a long game_seconds can take minutes) into your plan. The temporary farm always " +
             "has the game's base Unlocks, which cannot be switched off, even by setting them to 0 in unlocks. It " +
             "ends once its own game clock reaches warmup_seconds + game_seconds (to within one op), as a normal " +
             "end: status finished. Needs the simulation Unlock (as simulate() in a Script does) and fails when a " +
-            "Run is already in progress unless stop_current is set. Every parameter is checked first: an invalid " +
-            "one fails the call and starts nothing (and stops nothing, even with stop_current). The output is " +
-            "cleared when the simulation starts. Returns the Run as run_script does, with simulated: true (also in " +
+            "Run is already in progress unless stop_current is set. Everything is checked before anything is stopped " +
+            "or started: an invalid parameter, a Script that does not exist or one that does not parse stops nothing, " +
+            "even with stop_current (a syntax error then fails the call instead of giving parse_error, which would " +
+            "replace the Run in progress as the latest Run). The output is " +
+            "cleared when the simulated Run starts. Returns the Run as run_script does, with simulated: true (also in " +
             "wait_run and get_state): status, output, error (parse_error for a syntax error without starting " +
-            "anything; a runtime error stops the simulation and gives status error), and the summary, which counts " +
+            "anything; a runtime error stops the simulated Run and gives status error), and the summary, which counts " +
             "the temporary farm only, after the warmup, with failed_calls from the temporary farm (calls to " +
             "simulate() inside the Script are not counted): " + RunSummaryDescription +
             " wait_run, stop_run (back to the real farm at once) and the human's stop button apply to it; wait_run " +
@@ -321,17 +323,21 @@ public static partial class Tools
                 var timeout = WaitTimeout(args);
 
                 var state = await game.GetState(StateParts.Unlocks | StateParts.Inventory);
-                var options = SimulationOptionsFrom(args, state);
+                var options = SimulatedRunOptionsFrom(args, state);
                 if ((state.Unlocks.FirstOrDefault(u => u.Name == "simulation")?.Level ?? 0) < 1)
                     throw new ToolException("simulate_script needs the 'simulation' Unlock, which this Save has not bought " +
                         "yet (see plan_unlock and unlock).");
-                if (runs.InProgress)
+                if (runs.InProgress && !stopCurrent) throw new ToolException("A Run is in progress; pass stop_current to stop it first.");
+                var syntaxError = await game.ParseScript(name);
+                if (syntaxError != null && runs.InProgress)
                 {
-                    if (!stopCurrent) throw new ToolException("A Run is in progress; pass stop_current to stop it first.");
-                    await runs.StopByTool(StopTimeout, cancel);
+                    var at = RunErrorInfo.At(syntaxError.Message, null, name, syntaxError.Source, syntaxError.StartIndex);
+                    throw new ToolException($"Script '{name}' does not parse: {at.Message} (line {at.Line}, column {at.Column}). " +
+                        "The Run in progress was not stopped.");
                 }
+                if (syntaxError == null && runs.InProgress) await runs.StopByTool(StopTimeout, cancel);
 
-                var syntaxError = await game.StartSimulation(name, options, cancel);
+                syntaxError ??= await game.StartSimulatedRun(name, options, cancel);
                 if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
                 return await runs.Wait(timeout, cancel);
             },

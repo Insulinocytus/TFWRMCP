@@ -44,7 +44,7 @@ public class SimulateScriptTests
 
         Assert.True(isError);
         Assert.Contains("simulation", text);
-        Assert.Empty(game.Simulations);
+        Assert.Empty(game.SimulatedRuns);
     }
 
     [Theory]
@@ -63,7 +63,7 @@ public class SimulateScriptTests
 
         Assert.True(isError);
         Assert.Contains("game_seconds", text);
-        Assert.Empty(game.Simulations);
+        Assert.Empty(game.SimulatedRuns);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public class SimulateScriptTests
 
         Assert.True(isError);
         Assert.Contains("stop_current", text);
-        Assert.Empty(game.Simulations);
+        Assert.Empty(game.SimulatedRuns);
         Assert.True(game.RunActive);
         Assert.Equal(0, game.StopCalls);
     }
@@ -94,7 +94,7 @@ public class SimulateScriptTests
         var run = await Ok(s, "simulate_script", args);
 
         Assert.Equal(1, game.StopCalls);
-        Assert.Equal(new[] { ("main", 60.0) }, game.Simulations.Select(s => (s.Name, s.Options.GameSeconds)));
+        Assert.Equal(new[] { ("main", 60.0) }, game.SimulatedRuns.Select(s => (s.Name, s.Options.GameSeconds)));
         Assert.Equal("running", (string)run["status"]!);
         Assert.True((bool)run["simulated"]!);
     }
@@ -114,7 +114,57 @@ public class SimulateScriptTests
         Assert.Contains("No Script named 'nope'", text);
         Assert.Equal("parse_error", (string)run["status"]!);
         Assert.Equal(1, (int)run["error"]!["line"]!);
-        Assert.Empty(game.Simulations);
+        Assert.Empty(game.SimulatedRuns);
+    }
+
+    [Fact]
+    public async Task A_missing_Script_stops_nothing_even_with_stop_current()
+    {
+        var game = Game();
+        using var s = new TestServer(game);
+        await Ok(s, "run_script", new JObject { ["name"] = "main", ["timeout_seconds"] = 0 });
+        var args = new JObject { ["name"] = "nope", ["game_seconds"] = 60, ["stop_current"] = true };
+
+        var (isError, text) = await s.Call("simulate_script", args);
+
+        Assert.True(isError);
+        Assert.Contains("No Script named 'nope'", text);
+        Assert.Equal(0, game.StopCalls);
+        Assert.True(game.RunActive);
+    }
+
+    [Fact]
+    public async Task A_syntax_error_stops_nothing_even_with_stop_current_and_the_Run_in_progress_stays_the_latest_Run()
+    {
+        var game = Game();
+        game.Scripts["bad"] = "(";
+        game.SyntaxErrors["bad"] = new SyntaxError { Message = "bad", Source = "(", StartIndex = 0 };
+        using var s = new TestServer(game);
+        await Ok(s, "run_script", new JObject { ["name"] = "main", ["timeout_seconds"] = 0 });
+        var args = new JObject { ["name"] = "bad", ["game_seconds"] = 60, ["stop_current"] = true };
+
+        var (isError, text) = await s.Call("simulate_script", args);
+        var latest = await Ok(s, "wait_run", new JObject { ["timeout_seconds"] = 0 });
+
+        Assert.True(isError);
+        Assert.Contains("does not parse", text);
+        Assert.Equal(0, game.StopCalls);
+        Assert.True(game.RunActive);
+        Assert.Equal("running", (string)latest["status"]!);
+        Assert.Equal("main", (string)latest["script"]!);
+    }
+
+    [Fact]
+    public async Task A_syntax_error_with_no_Run_in_progress_is_still_a_parse_error_with_stop_current()
+    {
+        var game = Game();
+        game.Scripts["bad"] = "(";
+        game.SyntaxErrors["bad"] = new SyntaxError { Message = "bad", Source = "(", StartIndex = 0 };
+        using var s = new TestServer(game);
+
+        var run = await Ok(s, "simulate_script", new JObject { ["name"] = "bad", ["game_seconds"] = 60, ["stop_current"] = true });
+
+        Assert.Equal("parse_error", (string)run["status"]!);
     }
 
     [Fact]
@@ -141,7 +191,7 @@ public class SimulateScriptTests
     public async Task The_summary_comes_from_the_temporary_farm_not_the_real_one()
     {
         var game = Game();
-        game.OnStartSimulation = _ =>
+        game.OnStartSimulatedRun = _ =>
         {
             game.State.Inventory["hay"] = 99999;
             game.GameSeconds = 5000;
@@ -216,7 +266,7 @@ public class SimulateScriptTests
     public async Task A_runtime_error_ends_the_simulated_Run_as_error_with_its_position()
     {
         var game = Game();
-        game.OnStartSimulation = _ => game.Emit(new RunErrored("boom", "stack", "main", "a\nbb\n", 3));
+        game.OnStartSimulatedRun = _ => game.Emit(new RunErrored("boom", "stack", "main", "a\nbb\n", 3));
         using var s = new TestServer(game);
 
         var run = await Ok(s, "simulate_script", Sim());
@@ -248,7 +298,7 @@ public class SimulateScriptTests
     }
 
     [Fact]
-    public async Task Output_of_the_earlier_Run_is_gone_when_the_simulation_starts()
+    public async Task Output_of_the_earlier_Run_is_gone_when_the_simulated_Run_starts()
     {
         var game = Game();
         game.OnStartRun = _ =>
@@ -256,7 +306,7 @@ public class SimulateScriptTests
             game.Emit(new RunOutput("old"));
             game.Emit(new RunEnded(RunEnd.Terminated, new Dictionary<string, double>(game.State.Inventory), 1));
         };
-        game.OnStartSimulation = _ =>
+        game.OnStartSimulatedRun = _ =>
         {
             game.Emit(new RunOutput("new"));
             EndAt(game, 60);
@@ -277,7 +327,7 @@ public class SimulateScriptTests
 
         await Ok(s, "simulate_script", Sim(timeout: 0));
 
-        var options = game.Simulations.Single().Options;
+        var options = game.SimulatedRuns.Single().Options;
         Assert.Equal(60, options.GameSeconds);
         Assert.Equal(0, options.WarmupSeconds);
         Assert.Equal(-1, options.Seed);
@@ -300,7 +350,7 @@ public class SimulateScriptTests
 
         await Ok(s, "simulate_script", args);
 
-        var options = game.Simulations.Single().Options;
+        var options = game.SimulatedRuns.Single().Options;
         Assert.Equal(new Dictionary<string, int> { ["expand"] = 3, ["grass"] = 0 }, options.Unlocks);
         Assert.Equal(new Dictionary<string, double> { ["hay"] = 0, ["wood"] = 2e7 }, options.Items);
         Assert.Equal(new Dictionary<string, object> { ["K"] = 4.0, ["ratio"] = 0.5, ["mode"] = "fast", ["on"] = true }, options.Globals);
@@ -341,7 +391,7 @@ public class SimulateScriptTests
 
         Assert.True(isError);
         Assert.Contains(mention, text);
-        Assert.Empty(game.Simulations);
+        Assert.Empty(game.SimulatedRuns);
         Assert.Equal(0, game.StopCalls);
         Assert.True(game.RunActive);
     }
@@ -350,7 +400,7 @@ public class SimulateScriptTests
     public async Task The_summary_starts_over_when_the_warmup_ends()
     {
         var game = Game();
-        game.OnStartSimulation = _ =>
+        game.OnStartSimulatedRun = _ =>
         {
             game.Emit(new ActionCalled("harvest", true));
             game.Emit(new ActionCalled("harvest", true));
@@ -393,7 +443,7 @@ public class SimulateScriptTests
     public async Task A_simulated_Run_without_failures_has_empty_failed_calls()
     {
         var game = Game();
-        game.OnStartSimulation = _ => EndAt(game, 60);
+        game.OnStartSimulatedRun = _ => EndAt(game, 60);
         using var s = new TestServer(game);
 
         var run = await Ok(s, "simulate_script", Sim());

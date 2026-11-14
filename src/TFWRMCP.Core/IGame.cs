@@ -79,6 +79,12 @@ public interface IGame
     Task<string> ReadScript(string name);
 
     /// <summary>
+    /// The syntax error of the Script, null when it parses; changes nothing about the Run in progress. Throws a
+    /// <see cref="ToolException"/> when there is no Script of that name (exact match).
+    /// </summary>
+    Task<SyntaxError?> ParseScript(string name);
+
+    /// <summary>
     /// Creates or overwrites the Script so that it shows in its code window and is persisted to disk. Throws a
     /// <see cref="ToolException"/> for a name the game rejects (invalid, or clashing with another window) and when
     /// the Script is being run. Returns true when the Script was newly created.
@@ -91,7 +97,7 @@ public interface IGame
     /// <summary>
     /// Same as the human clicking run on the Script's code window. Throws a <see cref="ToolException"/> when the Script
     /// does not exist or any Run is in progress. Returns the syntax error when the Script does not parse, otherwise
-    /// null once the Run has started (<see cref="RunStarted"/> has been raised by then). Throws
+    /// null once the Run has started (<see cref="RunStarted"/> with StartedByTool has been raised by then). Throws
     /// <see cref="OperationCanceledException"/> without starting anything when <paramref name="cancel"/> is cancelled
     /// by the time the game would act.
     /// </summary>
@@ -100,7 +106,7 @@ public interface IGame
     /// <summary>
     /// Starts a simulated Run of the Script on a temporary farm at the game's top speed: the current Save's Unlocks and
     /// items with <paramref name="options"/> applied on top, ended as a normal end once the temporary farm's clock
-    /// reaches <see cref="SimulationOptions.WarmupSeconds"/> + <see cref="SimulationOptions.GameSeconds"/> (to within an
+    /// reaches <see cref="SimulatedRunOptions.WarmupSeconds"/> + <see cref="SimulatedRunOptions.GameSeconds"/> (to within an
     /// op). <see cref="WarmupEnded"/> is raised when the clock first reaches the warmup, or just before
     /// <see cref="RunEnded"/> if the Run ends sooner; never when there is no warmup. The real farm is paused meanwhile
     /// and is back by the time <see cref="RunEnded"/> is raised. Clears the game's output first. Throws a
@@ -109,7 +115,7 @@ public interface IGame
     /// has been raised by then). Throws <see cref="OperationCanceledException"/> without starting anything when
     /// <paramref name="cancel"/> is cancelled by the time the game would act.
     /// </summary>
-    Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel);
+    Task<SyntaxError?> StartSimulatedRun(string name, SimulatedRunOptions options, CancellationToken cancel);
 
     /// <summary>The temporary farm of the simulated Run in progress; null when there is none.</summary>
     Task<TemporaryFarm?> ReadTemporaryFarm();
@@ -197,7 +203,7 @@ public sealed class BuiltinList
 /// the Save's Unlocks and items, levels against the Unlock's maximum; each entry replaces the Save's value and the
 /// rest is the Save's as it is.
 /// </summary>
-public sealed class SimulationOptions
+public sealed class SimulatedRunOptions
 {
     public double GameSeconds { get; set; }
 

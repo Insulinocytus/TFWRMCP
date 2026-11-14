@@ -260,10 +260,11 @@ public class GetStateTests
         public Task SaveGame() => throw new NotSupportedException();
         public Task<List<string>> ListScripts() => throw new NotSupportedException();
         public Task<string> ReadScript(string name) => throw new NotSupportedException();
+        public Task<SyntaxError?> ParseScript(string name) => throw new NotSupportedException();
         public Task<bool> WriteScript(string name, string code) => throw new NotSupportedException();
         public Task DeleteScript(string name) => throw new NotSupportedException();
         public Task<SyntaxError?> StartRun(string name, CancellationToken cancel) => throw new NotSupportedException();
-        public Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel) => throw new NotSupportedException();
+        public Task<SyntaxError?> StartSimulatedRun(string name, SimulatedRunOptions options, CancellationToken cancel) => throw new NotSupportedException();
         public Task<TemporaryFarm?> ReadTemporaryFarm() => throw new NotSupportedException();
         public Task StopRun() => throw new NotSupportedException();
         public event Action<RunEvent> RunEvents { add { } remove { } }

@@ -665,13 +665,13 @@ def check_simulate_script(mcp):
     assert ok(mcp, "wait_run")["simulated"] is True
     print(f"    {run['game_seconds']} game seconds in {run['seconds']} s, inventory_delta {run['inventory_delta']}")
 
-    # The real farm keeps nothing of the simulation: same items (the game's own water, fertilizer and power aside).
+    # The real farm keeps nothing of the simulated Run: same items (the game's own water, fertilizer and power aside).
     after = inventory()
     changed = {item for item in before if before[item] != after[item]}
     assert after["hay"] == before["hay"] and changed <= {"water", "fertilizer", "power"}, (before, after)
     assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
 
-    # A simulation that outlasts the timeout keeps going: get_state still shows the real farm, wait_run and stop_run apply,
+    # A simulated Run that outlasts the timeout keeps going: get_state still shows the real farm, wait_run and stop_run apply,
     # and the real farm's clock stands still for as long as it runs.
     hay = inventory()["hay"]
     clock_before, wall_before = clock(), time.time()
@@ -683,7 +683,7 @@ def check_simulate_script(mcp):
         deadline = time.time() + 60
         while True:
             state = ok(mcp, "get_state", fields=["inventory", "run"])
-            assert state["inventory"]["hay"] == hay, "get_state during a simulation is not the real farm's"
+            assert state["inventory"]["hay"] == hay, "get_state during a simulated Run is not the real farm's"
             if state["run"]["simulated"] and state["run"]["inventory_delta"].get("hay", 0) > 0:
                 break
             assert time.time() < deadline, state["run"]
@@ -696,7 +696,7 @@ def check_simulate_script(mcp):
     clock_after, wall = clock(), time.time() - wall_before
     assert clock_after - clock_before < wall - 4, (clock_before, clock_after, wall)
     assert inventory()["hay"] == hay
-    print(f"    real clock {clock_before} -> {clock_after} over {wall:.1f} s with a simulation of {stopped['game_seconds']} game seconds")
+    print(f"    real clock {clock_before} -> {clock_after} over {wall:.1f} s with a simulated Run of {stopped['game_seconds']} game seconds")
 
     # stop_current stops a Run in progress first; the output of the earlier Run is gone.
     ok(mcp, "write_script", name="smoke_sim_print", code="print('simulated')\nwhile True:\n    do_a_flip()\n")
@@ -704,7 +704,7 @@ def check_simulate_script(mcp):
     run = ok(mcp, "simulate_script", name="smoke_sim_print", game_seconds=5, stop_current=True, timeout_seconds=60)
     assert run["status"] == "finished" and run["output"] == ["simulated"] and 5 - 0.01 <= run["game_seconds"] <= 5.5, run
 
-    # Errors: a syntax error starts nothing, a runtime error ends the simulation as error with its position.
+    # Errors: a syntax error starts nothing, a runtime error ends the simulated Run as error with its position.
     ok(mcp, "write_script", name="smoke_sim_syntax", code="x = = 1\n")
     run = ok(mcp, "simulate_script", name="smoke_sim_syntax", game_seconds=5)
     assert run["status"] == "parse_error" and run["error"]["line"] == 1, run
@@ -725,6 +725,7 @@ def check_simulate_params(mcp):
 
     # Every invalid parameter is refused before anything starts, and a stop_current does not stop the Run in progress.
     ok(mcp, "write_script", name="smoke_sim_noop", code="print('ran')\n")
+    ok(mcp, "write_script", name="smoke_sim_bad", code="x = = 1\n")
     run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=0)
     try:
         for params, expect in (
@@ -735,6 +736,12 @@ def check_simulate_params(mcp):
         ):
             fails(mcp, "simulate_script", expect, name="smoke_sim_noop", game_seconds=5, stop_current=True, **params)
             assert real_state("run")["run"]["status"] == "running", params
+
+        # A missing Script or a syntax error stops nothing either, and the Run in progress stays the latest Run.
+        fails(mcp, "simulate_script", "No Script named", name="smoke_no_such_script", game_seconds=5, stop_current=True)
+        fails(mcp, "simulate_script", "does not parse", name="smoke_sim_bad", game_seconds=5, stop_current=True)
+        latest = real_state("run")["run"]
+        assert latest["status"] == "running" and latest["script"] == "smoke_loop", latest
     finally:
         ok(mcp, "stop_run")
 
@@ -752,7 +759,7 @@ def check_simulate_params(mcp):
     real = real_state("world_size")["world_size"]
     assert sizes[1] != sizes[3] and default == str(real["x"]), (sizes, default, real)
 
-    # The same seed gives the same simulation.
+    # The same seed gives the same simulated Run.
     ok(mcp, "write_script", name="smoke_sim_seed", code=(
         "for i in range(50):\n    plant(Entities.Bush)\n    print(random())\n    harvest()\n"))
     first = simulate("smoke_sim_seed", game_seconds=5, seed=42)

@@ -147,13 +147,17 @@ public sealed class RunTracker
 
     sealed class Record
     {
-        public string Status = RunStatus.Idle;
+        public volatile string Status = RunStatus.Idle;
         public string? Script;
         public readonly Queue<string> Output = new();
         public int Dropped;
         public RunErrorInfo? Error;
         public LeaderboardOutcome? Leaderboard;
-        public bool StopRequestedByTool;
+        public volatile bool StopRequestedByTool;
+
+        // The simulation thread counts action calls under this lock alone, never the tracker's gate, which a Tool
+        // describing the Run holds while it copies the output. It guards Failed, Watch and Failing.
+        public readonly object CallsGate = new();
         public FailureWatch? Watch;
         public Dictionary<string, int>? Failing;
         public readonly TaskCompletionSource<bool> Over = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -172,7 +176,7 @@ public sealed class RunTracker
     readonly object gate = new();
     readonly IGame game;
     readonly Action<string> log;
-    Record current = new();
+    volatile Record current = new();
     FailureRule? pendingRule;
 
     public RunTracker(IGame game, Action<string> log)
@@ -210,8 +214,13 @@ public sealed class RunTracker
 
     void OnEvent(RunEvent e)
     {
+        if (e is ActionCalled called)
+        {
+            OnAction(called);
+            return;
+        }
+
         var stopAfterError = false;
-        var stopForFailures = false;
         lock (gate)
         {
             if (e is SaveLoading)
@@ -224,33 +233,24 @@ public sealed class RunTracker
             if (e is RunStarted started)
             {
                 current.Over.TrySetResult(true);
+                var rule = started.StartedByTool ? pendingRule : null;
                 current = new Record
                 {
                     Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
                     Simulated = started.Simulated, StartGameSeconds = started.Simulated ? 0 : game.GameSeconds,
-                    Watch = pendingRule == null ? null : new FailureWatch(pendingRule),
+                    Watch = rule == null ? null : new FailureWatch(rule),
                 };
-                pendingRule = null;
+                if (started.StartedByTool) pendingRule = null;
                 return;
             }
 
             if (current.Status != RunStatus.Running) return;
             switch (e)
             {
-                case ActionCalled called:
-                    if (called.Failed) current.Failed[called.Function] = current.Failed.GetValueOrDefault(called.Function) + 1;
-                    if (current.Watch is { } watch && watch.Observe(called.Function, called.Failed, game.GameSeconds))
-                    {
-                        current.Failing = watch.Failing(game.GameSeconds);
-                        current.Watch = null;
-                        current.StopRequestedByTool = true;
-                        stopForFailures = true;
-                    }
-                    break;
                 case WarmupEnded warmup when current.Simulated:
                     current.StartInventory = warmup.Inventory;
                     current.StartGameSeconds = warmup.Seconds;
-                    current.Failed.Clear();
+                    lock (current.CallsGate) current.Failed.Clear();
                     break;
                 case RunOutput output:
                     current.Output.Enqueue(output.Text);
@@ -285,7 +285,25 @@ public sealed class RunTracker
         }
 
         if (stopAfterError) _ = StopAfterError();
-        if (stopForFailures) _ = StopAfterFailures();
+    }
+
+    // The hot path, on the simulation thread once per action call: never waits for the gate, which a Tool describing the
+    // Run holds while it copies the output.
+    void OnAction(ActionCalled called)
+    {
+        var run = current;
+        if (run.Status != RunStatus.Running) return;
+        lock (run.CallsGate)
+        {
+            if (called.Failed) run.Failed[called.Function] = run.Failed.GetValueOrDefault(called.Function) + 1;
+            if (run.Watch is not { } watch) return;
+            var now = game.GameSeconds;
+            if (!watch.Observe(called.Function, called.Failed, now)) return;
+            run.Failing = watch.Failing(now);
+            run.Watch = null;
+            run.StopRequestedByTool = true;
+        }
+        _ = StopAfterFailures();
     }
 
     /// <summary>The game leaves a Run paused on a runtime error; stop it so the game is usable again and the Run ends as error.</summary>
@@ -363,7 +381,7 @@ public sealed class RunTracker
                 .Select(item => (Item: item, Change: end.GetValueOrDefault(item) - r.StartInventory.GetValueOrDefault(item)))
                 .Where(c => c.Change != 0)
                 .ToDictionary(c => c.Item, c => c.Change);
-        snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
+        lock (r.CallsGate) snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
         snapshot.Ticks = running ? game.RunTicks : r.EndTicks;
         snapshot.Seconds = Math.Round(r.Clock.Elapsed.TotalSeconds, 3);
         var now = !running ? r.EndGameSeconds : r.Simulated ? liveSeconds ?? 0 : game.GameSeconds;
@@ -400,8 +418,8 @@ public sealed class RunTracker
     }
 
     /// <summary>
-    /// Watches the Run that starts next on the Agent's behalf: it is stopped as soon as a function fails
-    /// <paramref name="rule"/>, counting calls from its first one. Null withdraws a rule the next Run did not take.
+    /// Watches the Run the Tool starts next (<see cref="RunStarted.StartedByTool"/>; one the human starts does not take it):
+    /// it is stopped as soon as a function fails <paramref name="rule"/>, counting calls from its first one. Null withdraws a rule the next Run did not take.
     /// </summary>
     public void StopOnFailuresInNextRun(FailureRule? rule)
     {
