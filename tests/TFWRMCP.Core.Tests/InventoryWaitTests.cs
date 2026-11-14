@@ -277,7 +277,7 @@ public class InventoryWaitTests
     }
 
     [Fact]
-    public async Task The_tool_schemas_describe_the_new_arguments_and_timeout_zero()
+    public async Task The_tool_schemas_describe_the_new_arguments_and_the_timeout()
     {
         using var s = new TestServer(GameWith());
 
@@ -292,7 +292,7 @@ public class InventoryWaitTests
             Assert.Contains("default 20", timeout);
             Assert.Contains("request timeout", timeout);
             Assert.Contains("wait_run", timeout);
-            Assert.Contains("0", timeout);
+            Assert.Contains("0 does not wait", timeout);
         }
         Assert.Null(tools["run_script"]["inputSchema"]!["properties"]!["wait"]);
     }
