@@ -15,6 +15,14 @@ public static class FarmBounds
     public static void Install() => Patching.Safely(nameof(FarmBounds),
         () => farmCamera = AccessTools.FieldRefAccess<FarmRenderer, Camera>("farmCamera"));
 
+    /// <summary>The grid size of the farm being rendered, null while there is none; changes exactly when the farm does.</summary>
+    public static Vector2Int? Size()
+    {
+        var main = MainSim.Inst;
+        var ground = main == null ? null : main.GetRenderPackage()?.groundData;
+        return ground == null ? null : ground.sizexy;
+    }
+
     public static bool TryGet(Workspace workspace, out Box farm)
     {
         farm = default;
