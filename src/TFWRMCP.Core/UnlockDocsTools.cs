@@ -117,7 +117,8 @@ public static partial class Tools
             "list_docs",
             "Lists the documentation pages in the game's docs window (what its home page links to, in the game's " +
             "language) as {page, title}. Pages for content you have not unlocked yet are left out unless include_locked " +
-            "is true; they then carry locked: true, and read_doc answers them with the game's placeholder. " + PageIdsDescription,
+            "is true; they then carry locked: true (including unlocks/<name> for every locked Unlock), and read_doc " +
+            "answers them with the game's placeholder. " + PageIdsDescription,
             Schema(("include_locked", "boolean", "Also list pages for content not unlocked yet. Defaults to false.", false)),
             async (args, _) =>
             {

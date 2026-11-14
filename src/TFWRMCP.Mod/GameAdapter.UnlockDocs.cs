@@ -113,7 +113,7 @@ public sealed partial class GameAdapter
         };
     }
 
-    public Task<string> ReadDoc(string page) => MainThread.Run(() => RenderDoc(page, false));
+    public Task<string> ReadDoc(string page) => MainThread.Run(() => RenderDoc(page, keepLockedSections: false));
 
     /// <param name="keepLockedSections">Keep the &lt;unlock=X&gt; sections the docs window drops for locked Unlocks.</param>
     static string RenderDoc(string doc, bool keepLockedSections)
@@ -127,9 +127,20 @@ public sealed partial class GameAdapter
             PlatformManager.IsDlcInstalled(EDlcType.Mining), ItemBlockSection);
     }
 
-    public Task<IReadOnlyList<DocLink>> ListDocs(bool includeLocked) => MainThread.Run(() =>
-        (IReadOnlyList<DocLink>)DocMarkup.Links(RenderDoc(HomePage, includeLocked))
-            .Select(l => new DocLink(l.Page, l.Title, MissingUnlock(l.Page) != null)).ToList());
+    public Task<IReadOnlyList<DocLink>> ListDocs(bool includeLocked) => MainThread.Run<IReadOnlyList<DocLink>>(() =>
+    {
+        var pages = DocMarkup.Links(RenderDoc(HomePage, keepLockedSections: includeLocked))
+            .Select(l => new DocLink(l.Page, l.Title, MissingUnlock(l.Page) != null))
+            .Where(l => includeLocked || !l.Locked).ToList();
+        if (!includeLocked) return pages;
+
+        // The home page links only a few generated unlocks/<name> pages; list every locked one.
+        var listed = pages.Select(p => p.Page).ToHashSet();
+        pages.AddRange(ListedUnlocks()
+            .Select(u => new DocLink("unlocks/" + u.unlockName, Localizer.Localize(u.unlockName), true))
+            .Where(l => !listed.Contains(l.Page) && MissingUnlock(l.Page) != null));
+        return pages;
+    });
 
     /// <summary>Mirrors DocsWindow.DisplayDoc (placeholder for locked pages, generated pages, files); null when the page does not exist.</summary>
     static string? DocSource(string doc)

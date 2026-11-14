@@ -428,10 +428,10 @@ def check_docs(mcp):
     is_error, full = mcp.call("list_docs", include_locked=True)
     assert not is_error, full
     locked = {p["page"] for p in full["pages"] if p.get("locked")}
-    assert {"docs/unlocks/megafarm.md", "docs/scripting/for.md"} <= locked, locked
+    assert {"unlocks/megafarm", "docs/unlocks/megafarm.md", "docs/scripting/for.md"} <= locked, locked
     assert set(pages) <= {p["page"] for p in full["pages"] if not p.get("locked")}, full
 
-    # Locked pages read as the game's "unlock X first" page, which links to the tech tree; the others are real pages.
+    # Locked pages show the game's "you need to unlock X" page, which links to the tech tree; the others are real pages.
     for p in full["pages"]:
         is_error, doc = mcp.call("read_doc", page=p["page"])
         assert not is_error and doc["page"] == p["page"] and doc["content"].strip(), (p, doc)
