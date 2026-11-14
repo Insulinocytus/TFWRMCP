@@ -725,6 +725,7 @@ def check_simulate_params(mcp):
 
     # Every invalid parameter is refused before anything starts, and a stop_current does not stop the Run in progress.
     ok(mcp, "write_script", name="smoke_sim_noop", code="print('ran')\n")
+    ok(mcp, "write_script", name="smoke_sim_bad", code="x = = 1\n")
     run_wait(mcp, "smoke_loop", "while True:\n    do_a_flip()\n", timeout=0)
     try:
         for params, expect in (
@@ -735,6 +736,12 @@ def check_simulate_params(mcp):
         ):
             fails(mcp, "simulate_script", expect, name="smoke_sim_noop", game_seconds=5, stop_current=True, **params)
             assert real_state("run")["run"]["status"] == "running", params
+
+        # A missing Script or a syntax error stops nothing either, and the Run in progress stays the latest Run.
+        fails(mcp, "simulate_script", "No Script named", name="smoke_no_such_script", game_seconds=5, stop_current=True)
+        fails(mcp, "simulate_script", "does not parse", name="smoke_sim_bad", game_seconds=5, stop_current=True)
+        latest = real_state("run")["run"]
+        assert latest["status"] == "running" and latest["script"] == "smoke_loop", latest
     finally:
         ok(mcp, "stop_run")
 

@@ -51,6 +51,12 @@ public sealed partial class FakeGame
     public Task<string> ReadScript(string name) =>
         Scripts.TryGetValue(name, out var code) ? Task.FromResult(code) : throw new ToolException($"No Script named '{name}'.");
 
+    public Task<SyntaxError?> ParseScript(string name)
+    {
+        if (!Scripts.ContainsKey(name)) throw new ToolException($"No Script named '{name}'.");
+        return Task.FromResult(SyntaxErrors.GetValueOrDefault(name));
+    }
+
     public Task<bool> WriteScript(string name, string code)
     {
         var created = !Scripts.ContainsKey(name);

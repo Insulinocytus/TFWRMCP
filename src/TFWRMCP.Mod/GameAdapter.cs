@@ -221,6 +221,15 @@ public sealed partial class GameAdapter : IGame
 
     public Task<string> ReadScript(string name) => MainThread.Run(() => FindScript(name).CodeInput.text);
 
+    public Task<SyntaxError?> ParseScript(string name) => MainThread.Run(() => ParseError(FindScript(name), name));
+
+    SyntaxError? ParseError(CodeWindow window, string name)
+    {
+        if (window.Parse() != null) return null;
+        if (parseExceptionField!.GetValue(window) is not ParseException error) throw new ToolException($"The game did not parse '{name}'.");
+        return SyntaxErrorOf(window, error);
+    }
+
     public async Task<bool> WriteScript(string name, string code)
     {
         var created = await MainThread.Run(() =>

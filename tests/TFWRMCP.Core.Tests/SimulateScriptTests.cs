@@ -118,6 +118,56 @@ public class SimulateScriptTests
     }
 
     [Fact]
+    public async Task A_missing_Script_stops_nothing_even_with_stop_current()
+    {
+        var game = Game();
+        using var s = new TestServer(game);
+        await Ok(s, "run_script", new JObject { ["name"] = "main", ["timeout_seconds"] = 0 });
+        var args = new JObject { ["name"] = "nope", ["game_seconds"] = 60, ["stop_current"] = true };
+
+        var (isError, text) = await s.Call("simulate_script", args);
+
+        Assert.True(isError);
+        Assert.Contains("No Script named 'nope'", text);
+        Assert.Equal(0, game.StopCalls);
+        Assert.True(game.RunActive);
+    }
+
+    [Fact]
+    public async Task A_syntax_error_stops_nothing_even_with_stop_current_and_the_Run_in_progress_stays_the_latest_Run()
+    {
+        var game = Game();
+        game.Scripts["bad"] = "(";
+        game.SyntaxErrors["bad"] = new SyntaxError { Message = "bad", Source = "(", StartIndex = 0 };
+        using var s = new TestServer(game);
+        await Ok(s, "run_script", new JObject { ["name"] = "main", ["timeout_seconds"] = 0 });
+        var args = new JObject { ["name"] = "bad", ["game_seconds"] = 60, ["stop_current"] = true };
+
+        var (isError, text) = await s.Call("simulate_script", args);
+        var latest = await Ok(s, "wait_run", new JObject { ["timeout_seconds"] = 0 });
+
+        Assert.True(isError);
+        Assert.Contains("does not parse", text);
+        Assert.Equal(0, game.StopCalls);
+        Assert.True(game.RunActive);
+        Assert.Equal("running", (string)latest["status"]!);
+        Assert.Equal("main", (string)latest["script"]!);
+    }
+
+    [Fact]
+    public async Task A_syntax_error_with_no_Run_in_progress_is_still_a_parse_error_with_stop_current()
+    {
+        var game = Game();
+        game.Scripts["bad"] = "(";
+        game.SyntaxErrors["bad"] = new SyntaxError { Message = "bad", Source = "(", StartIndex = 0 };
+        using var s = new TestServer(game);
+
+        var run = await Ok(s, "simulate_script", new JObject { ["name"] = "bad", ["game_seconds"] = 60, ["stop_current"] = true });
+
+        Assert.Equal("parse_error", (string)run["status"]!);
+    }
+
+    [Fact]
     public async Task Simulated_is_true_in_simulate_script_wait_run_and_get_state_and_absent_for_normal_Runs()
     {
         var game = Game();

@@ -92,7 +92,9 @@ Actions on the temporary farm of `simulate()` and leaderboard runs do not count;
 `simulate_script(name, game_seconds)` runs a Script as a simulated Run on a temporary farm that starts with the
 current Save's Unlocks and items, at the game's top speed, and ends it once the temporary farm's own clock has reached
 `warmup_seconds + game_seconds` (to within one op; status `finished`). It needs the `simulation` Unlock, the same as
-calling `simulate()` in a Script, and fails while a Run is in progress unless you pass `stop_current: true`. The
+calling `simulate()` in a Script, and fails while a Run is in progress unless you pass `stop_current: true`; even then
+an invalid parameter, a missing Script or a syntax error (which fails the call instead of returning `parse_error`)
+stops nothing. The
 temporary farm is thrown away afterwards, so the Save is untouched, **but the real farm is completely paused for as
 long as the simulated Run runs**: nothing grows or accumulates there meanwhile, and `get_state` keeps returning the real
 farm. The real duration depends on your CPU, so a long `game_seconds` can take minutes; `timeout_seconds` works as in

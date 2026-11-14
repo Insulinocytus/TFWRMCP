@@ -14,11 +14,12 @@ public sealed partial class GameAdapter
         ResolveMethods(Capabilities.Simulation, warn,
             ("MainSim", "ScheduleLeaderboardStart"), ("MainSim", "GetSerializedUnlocks"), ("MainSim", "GetInventory"),
             ("LeaderboardManager", "RemoveOverlay"), ("CodeWindow", "Parse"));
+        var scheduledStart = Resolve(Capabilities.Simulation, Field("MainSim", "startLeaderboardNow"), "MainSim.startLeaderboardNow", warn);
         if (UnavailableReason(Capabilities.Run) != null || UnavailableReason(Capabilities.State) != null)
             Fail(Capabilities.Simulation, "the Run or State capability is unavailable", warn);
         if (UnavailableReason(Capabilities.Simulation) != null) return;
 
-        SimulatedRun.Configure(e => RunEvents(e), warn, simField, lockField);
+        SimulatedRun.Configure(e => RunEvents(e), warn, simField, lockField, scheduledStart);
         PatchSimulation("MainSim", "StartLeaderboard", warn, finalizer: nameof(SimulatedRun.StartLeaderboardEnd));
         PatchSimulation("Simulation", "RunNextStep", warn, prefix: nameof(SimulatedRun.BeforeStep));
         PatchSimulation("Simulation", "StopProgramExecution", warn, prefix: nameof(SimulatedRun.ProgramEnding));
@@ -31,29 +32,24 @@ public sealed partial class GameAdapter
 
     public async Task<SyntaxError?> StartSimulatedRun(string name, SimulatedRunOptions options, CancellationToken cancel)
     {
-        var (error, started) = await MainThread.Run<(SyntaxError? Error, Task Started)>(() =>
+        var (error, pending) = await MainThread.Run<(SyntaxError? Error, SimulatedRun.Pending? Pending)>(() =>
         {
             var window = FindScript(name);
             var main = MainSim.Inst;
             if (main.IsExecuting() || SimulatedRun.Busy)
                 throw new ToolException("A Run is already in progress; use wait_run to wait for it or stop_run to stop it.");
 
-            if (window.Parse() == null)
-            {
-                if (parseExceptionField!.GetValue(window) is not ParseException parseError)
-                    throw new ToolException($"The game did not parse '{name}'.");
-                return (SyntaxErrorOf(window, parseError), Task.CompletedTask);
-            }
+            if (ParseError(window, name) is { } syntaxError) return (syntaxError, null);
 
             var args = new MainSim.LeaderboardStartArgs(name, OverrideUnlocks(main.GetSerializedUnlocks(), options.Unlocks),
                 OverrideItems(main.GetInventory(), options.Items), Globals(options.Globals), "", "", LeaderboardType.simulation, true,
                 EDlcType.None, options.Seed);
             main.Logger.Clear();
             main.ScheduleLeaderboardStart(args);
-            return ((SyntaxError?)null, SimulatedRun.Expect(name, options.WarmupSeconds, options.GameSeconds));
+            return (null, SimulatedRun.Expect(main, name, options.WarmupSeconds, options.GameSeconds));
         }, cancel);
 
-        await started;
+        if (pending != null) await SimulatedRun.WaitForStart(pending, cancel);
         return error;
     }
 

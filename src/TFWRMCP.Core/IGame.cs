@@ -79,6 +79,12 @@ public interface IGame
     Task<string> ReadScript(string name);
 
     /// <summary>
+    /// The syntax error of the Script, null when it parses; changes nothing about the Run in progress. Throws a
+    /// <see cref="ToolException"/> when there is no Script of that name (exact match).
+    /// </summary>
+    Task<SyntaxError?> ParseScript(string name);
+
+    /// <summary>
     /// Creates or overwrites the Script so that it shows in its code window and is persisted to disk. Throws a
     /// <see cref="ToolException"/> for a name the game rejects (invalid, or clashing with another window) and when
     /// the Script is being run. Returns true when the Script was newly created.

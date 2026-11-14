@@ -304,8 +304,10 @@ public static partial class Tools
             "has the game's base Unlocks, which cannot be switched off, even by setting them to 0 in unlocks. It " +
             "ends once its own game clock reaches warmup_seconds + game_seconds (to within one op), as a normal " +
             "end: status finished. Needs the simulation Unlock (as simulate() in a Script does) and fails when a " +
-            "Run is already in progress unless stop_current is set. Every parameter is checked first: an invalid " +
-            "one fails the call and starts nothing (and stops nothing, even with stop_current). The output is " +
+            "Run is already in progress unless stop_current is set. Everything is checked before anything is stopped " +
+            "or started: an invalid parameter, a Script that does not exist or one that does not parse stops nothing, " +
+            "even with stop_current (a syntax error then fails the call instead of giving parse_error, which would " +
+            "replace the Run in progress as the latest Run). The output is " +
             "cleared when the simulated Run starts. Returns the Run as run_script does, with simulated: true (also in " +
             "wait_run and get_state): status, output, error (parse_error for a syntax error without starting " +
             "anything; a runtime error stops the simulated Run and gives status error), and the summary, which counts " +
@@ -325,13 +327,17 @@ public static partial class Tools
                 if ((state.Unlocks.FirstOrDefault(u => u.Name == "simulation")?.Level ?? 0) < 1)
                     throw new ToolException("simulate_script needs the 'simulation' Unlock, which this Save has not bought " +
                         "yet (see plan_unlock and unlock).");
-                if (runs.InProgress)
+                if (runs.InProgress && !stopCurrent) throw new ToolException("A Run is in progress; pass stop_current to stop it first.");
+                var syntaxError = await game.ParseScript(name);
+                if (syntaxError != null && runs.InProgress)
                 {
-                    if (!stopCurrent) throw new ToolException("A Run is in progress; pass stop_current to stop it first.");
-                    await runs.StopByTool(StopTimeout, cancel);
+                    var at = RunErrorInfo.At(syntaxError.Message, null, name, syntaxError.Source, syntaxError.StartIndex);
+                    throw new ToolException($"Script '{name}' does not parse: {at.Message} (line {at.Line}, column {at.Column}). " +
+                        "The Run in progress was not stopped.");
                 }
+                if (syntaxError == null && runs.InProgress) await runs.StopByTool(StopTimeout, cancel);
 
-                var syntaxError = await game.StartSimulatedRun(name, options, cancel);
+                syntaxError ??= await game.StartSimulatedRun(name, options, cancel);
                 if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
                 return await runs.Wait(timeout, cancel);
             },

@@ -43,15 +43,18 @@ public static class SimulatedRun
         public bool TryEndWarmup() => Interlocked.Exchange(ref warmupPending, 0) == 1;
     }
 
-    sealed class Pending
+    /// <summary>A scheduled start the game has not taken yet, with the MainSim it was scheduled on.</summary>
+    public sealed class Pending
     {
+        public MainSim Main { get; }
         public string Script { get; }
         public double WarmupSeconds { get; }
         public double GameSeconds { get; }
         public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Pending(string script, double warmupSeconds, double gameSeconds)
+        public Pending(MainSim main, string script, double warmupSeconds, double gameSeconds)
         {
+            Main = main;
             Script = script;
             WarmupSeconds = warmupSeconds;
             GameSeconds = gameSeconds;
@@ -62,6 +65,7 @@ public static class SimulatedRun
     static Action<string> log = _ => { };
     static FieldInfo? simField;
     static FieldInfo? lockField;
+    static FieldInfo? scheduledStartField;
 
     // Between scheduling the start and the game's next MainSim.Update consuming it.
     static Pending? starting;
@@ -83,20 +87,51 @@ public static class SimulatedRun
         }
     }
 
-    public static void Configure(Action<RunEvent> emitEvent, Action<string> logError, FieldInfo? sim, FieldInfo? simulationLock)
+    public static void Configure(Action<RunEvent> emitEvent, Action<string> logError, FieldInfo? sim, FieldInfo? simulationLock, FieldInfo? scheduledStart)
     {
         emit = emitEvent;
         log = logError;
         simField = sim;
         lockField = simulationLock;
+        scheduledStartField = scheduledStart;
     }
 
-    /// <summary>Completes once the game has started the simulated Run (RunStarted raised) and fails when it could not.</summary>
-    public static Task Expect(string script, double warmupSeconds, double gameSeconds)
+    static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Records the start just scheduled on <paramref name="main"/>; the game takes it in its next MainSim.Update.</summary>
+    public static Pending Expect(MainSim main, string script, double warmupSeconds, double gameSeconds)
     {
-        var pending = new Pending(script, warmupSeconds, gameSeconds);
+        var pending = new Pending(main, script, warmupSeconds, gameSeconds);
         starting = pending;
-        return pending.Started.Task;
+        return pending;
+    }
+
+    /// <summary>
+    /// Completes once the game has started the simulated Run (RunStarted raised) and fails when it could not. If the game
+    /// does not take the start in time (a scene reload swallowed it) or <paramref name="cancel"/> fires first, the start is
+    /// withdrawn and nothing is started: on the main thread, where it cannot race the game taking it.
+    /// </summary>
+    public static async Task WaitForStart(Pending pending, CancellationToken cancel)
+    {
+        using var stopWaiting = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        var done = await Task.WhenAny(pending.Started.Task, Task.Delay(StartTimeout, stopWaiting.Token));
+        stopWaiting.Cancel();
+        if (done == pending.Started.Task || !await MainThread.Run(() => Withdraw(pending)))
+        {
+            await pending.Started.Task;
+            return;
+        }
+
+        cancel.ThrowIfCancellationRequested();
+        throw new ToolException($"The game did not start the simulated Run within {StartTimeout.TotalSeconds:0} seconds; nothing was started.");
+    }
+
+    // False when the game has taken the start meanwhile.
+    static bool Withdraw(Pending pending)
+    {
+        if (Interlocked.CompareExchange(ref starting, null, pending) != pending) return false;
+        scheduledStartField!.SetValue(pending.Main, null);
+        return true;
     }
 
     static Dictionary<string, double> Inventory(Simulation sim) => GameAdapter.Items(sim.farm.Items, includeZero: true);
