@@ -213,8 +213,8 @@ public sealed class RunTracker
             if (current.Status != RunStatus.Running) return;
             switch (e)
             {
-                case ActionFailed failed:
-                    current.Failed[failed.Function] = current.Failed.GetValueOrDefault(failed.Function) + 1;
+                case ActionCalled called:
+                    if (called.Failed) current.Failed[called.Function] = current.Failed.GetValueOrDefault(called.Function) + 1;
                     break;
                 case RunOutput output:
                     current.Output.Enqueue(output.Text);

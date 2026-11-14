@@ -64,8 +64,8 @@ public class RunSummaryTests
         var game = GameWithScript();
         game.OnStartRun = _ =>
         {
-            for (var i = 0; i < 3; i++) game.Emit(new ActionFailed("plant"));
-            game.Emit(new ActionFailed("harvest"));
+            for (var i = 0; i < 3; i++) game.Emit(new ActionCalled("plant", failed: true));
+            game.Emit(new ActionCalled("harvest", failed: true));
             game.Emit(new RunEnded(RunEnd.Terminated, Inventory(game), 10));
         };
         using var s = new TestServer(game);
@@ -73,6 +73,24 @@ public class RunSummaryTests
         var run = await Ok(s, "run_script", Run());
 
         Assert.Equal(new JObject { ["plant"] = 3, ["harvest"] = 1 }, run["failed_calls"]);
+    }
+
+    [Fact]
+    public async Task Successful_calls_are_not_failed_calls()
+    {
+        var game = GameWithScript();
+        game.OnStartRun = _ =>
+        {
+            for (var i = 0; i < 5; i++) game.Emit(new ActionCalled("plant", failed: false));
+            game.Emit(new ActionCalled("plant", failed: true));
+            game.Emit(new ActionCalled("move", failed: false));
+            game.Emit(new RunEnded(RunEnd.Terminated, Inventory(game), 10));
+        };
+        using var s = new TestServer(game);
+
+        var run = await Ok(s, "run_script", Run());
+
+        Assert.Equal(new JObject { ["plant"] = 1 }, run["failed_calls"]);
     }
 
     [Fact]
@@ -179,7 +197,7 @@ public class RunSummaryTests
         using var s = new TestServer(game);
 
         game.Emit(new RunStarted("main", Inventory(game)));
-        game.Emit(new ActionFailed("move"));
+        game.Emit(new ActionCalled("move", failed: true));
         var state = await Ok(s, "get_state", new JObject { ["fields"] = new JArray("run") });
 
         Assert.Equal(new JObject { ["move"] = 1 }, state["run"]!["failed_calls"]);
@@ -211,7 +229,7 @@ public class RunSummaryTests
         var game = GameWithScript();
         using var s = new TestServer(game);
         await Ok(s, "run_script", Run(timeout: 0));
-        game.Emit(new ActionFailed("plant"));
+        game.Emit(new ActionCalled("plant", failed: true));
 
         game.Emit(new SaveLoading());
         var state = await Ok(s, "get_state", new JObject { ["fields"] = new JArray("run") });
