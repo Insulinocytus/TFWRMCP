@@ -9,7 +9,8 @@ namespace TFWRMCP.Mod;
 /// While the config says so, holds the camera on the farm being shown (see <see cref="CameraTarget"/>): every frame the
 /// farm's rectangle is polled, and when the view that fits it and the code windows changes (the farm grew, shrank or was
 /// swapped for a temporary one, a window moved), the workspace's pan and zoom glide there over a second. The zoom is applied
-/// the way <c>Workspace.Zoom</c> applies it. The player's own camera operations (WASD, scroll zoom off the windows, drag pan)
+/// the way <c>Workspace.Zoom</c> applies it. The player's own camera operations (WASD, scroll zoom off the windows, drag pan,
+/// the game's jump to a window for an error or a search)
 /// take the camera from the Mod, see <see cref="CameraTakeover"/>. They are noticed in the game's input code, which does not
 /// run during the Input Lock, while the rest of this keeps working. A game member that is missing or not what it is assumed to
 /// be turns the feature off, or only the noticing of the operations it belongs to.
@@ -37,10 +38,10 @@ public sealed class CameraAutoCenter : MonoBehaviour
     static Vector2 panBefore;
 
     readonly CameraTakeover takeover = new();
+    Workspace? workspace;
     Vector2Int? farmSize;
     bool simulating;
 
-    // The one place that says whether the Mod owns the camera now.
     bool InControl => takeover.InControl(Time.unscaledTimeAsDouble);
 
     public void Install(Plugin owner)
@@ -48,6 +49,7 @@ public sealed class CameraAutoCenter : MonoBehaviour
         plugin = owner;
         current = this;
         Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(Workspace), "Zoom"), "Workspace.Zoom", postfix: nameof(Operated));
+        Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(Workspace), nameof(Workspace.MoveCameraTo)), "Workspace.MoveCameraTo", postfix: nameof(Operated));
         Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(ScaledScrollRect), "OnDrag"), "ScaledScrollRect.OnDrag", prefix: nameof(Dragged));
         Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(InputBoss), "Update"), "InputBoss.Update",
             prefix: nameof(InputBegin), postfix: nameof(InputEnd));
@@ -84,6 +86,15 @@ public sealed class CameraAutoCenter : MonoBehaviour
             return;
         }
 
+        if (space != workspace)
+        {
+            workspace = space;
+            glide = false;
+            farmSize = null;
+            simulating = false;
+            takeover.FarmChanged();
+        }
+
         Track(main!);
         if (!InControl)
         {
@@ -113,12 +124,17 @@ public sealed class CameraAutoCenter : MonoBehaviour
         var now = Time.unscaledTimeAsDouble;
         if (!glide || (target - toPan).magnitude > PanTolerance || Mathf.Abs(view.Zoom - toZoom) > ZoomTolerance)
         {
-            glide = true;
-            fromPan = pan;
-            fromZoom = zoom;
+            // Mid-glide only the end moves, so a target that keeps changing (a dragged window) is followed instead of restarted from a standstill.
+            if (!glide || now >= start + Duration)
+            {
+                glide = true;
+                fromPan = pan;
+                fromZoom = zoom;
+                start = now;
+            }
+
             toPan = target;
             toZoom = view.Zoom;
-            start = now;
         }
 
         SetZoom(content, camera, space.zoomContainer, Tween.EaseOutExpo(fromZoom, toZoom, start, Duration, now));
@@ -131,17 +147,11 @@ public sealed class CameraAutoCenter : MonoBehaviour
     void Track(MainSim main)
     {
         var size = FarmBounds.Size();
-        if (size != farmSize)
-        {
-            farmSize = size;
-            takeover.FarmResized();
-        }
-
         var temporary = main.storedSim != null;
-        if (temporary == simulating) return;
+        if (size == farmSize && temporary == simulating) return;
+        farmSize = size;
         simulating = temporary;
-        if (temporary) takeover.LeaderboardRunStarted();
-        else takeover.LeaderboardRunEnded();
+        takeover.FarmChanged();
     }
 
     static RectTransform? Container()
@@ -150,7 +160,7 @@ public sealed class CameraAutoCenter : MonoBehaviour
         return main == null || main.workspace == null ? null : main.workspace.workspaceContainer;
     }
 
-    // Workspace.Zoom(float), postfix: only the scroll over no window zooms the workspace, and nothing else here calls it.
+    // Workspace.Zoom(float) and MoveCameraTo(...), postfix: only the scroll over no window zooms the workspace, and MoveCameraTo is the game's own jump (CodeWindow error, SearchBox), which its LateUpdate would otherwise undo.
     static void Operated() => Patching.Safely(nameof(Operated), () => current?.takeover.PlayerOperated(Time.unscaledTimeAsDouble));
 
     // ScaledScrollRect.OnDrag(PointerEventData), prefix: the workspace's drag pan, wherever the drag started.

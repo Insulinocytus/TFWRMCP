@@ -29,20 +29,20 @@ public class CameraTargetTests
     }
 
     [Fact]
-    public void The_resource_bar_height_is_taken_off_the_vertical_room()
+    public void The_resource_bar_height_is_taken_off_both_halves_of_the_vertical_room()
     {
-        // Farm alone: 600 range; 1080 - 120 high leaves 960 / 600, tighter than 1920 / 600.
-        Assert.Equal(1.6f, Fit(bar: 120).Zoom, 4);
+        // The range is centered on screen, so the bar's 120 is deducted at the top as well: farm alone, 600 range in 1080 - 240.
+        Assert.Equal(1.4f, Fit(bar: 120).Zoom, 4);
         Assert.Equal(1.8f, Fit().Zoom, 4);
     }
 
     [Fact]
     public void A_window_far_above_the_farm_limits_the_zoom_by_height()
     {
-        // Its top edge is 800 above the center: a 1600 range in 1080 - 80.
+        // Its top edge is 800 above the center: a 1600 range in 1080 - 160.
         var view = Fit(new[] { new Box(1100, 1000, 1500, 900) }, bar: 80);
 
-        Assert.Equal(1000f / 1600f, view.Zoom, 4);
+        Assert.Equal(920f / 1600f, view.Zoom, 4);
     }
 
     [Fact]

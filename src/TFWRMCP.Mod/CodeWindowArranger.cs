@@ -7,13 +7,10 @@ using UnityEngine;
 namespace TFWRMCP.Mod;
 
 /// <summary>
-/// Keeps the code windows around the farm (see <see cref="Layout"/>): whenever the set of windows the game marks as running
-/// changes (a Run starting, ending, or a window being executed for the first time in a Run), a Script is created, deleted or
-/// renamed (by the player or a Tool), the farm changes size, or a window's line count has stopped changing for a moment, and
-/// when the option is switched on, windows that are running or focused open at their automatic size, the rest fold, and all
-/// glide to their places. Windows docked together are one unit, moved by their top window; a group holding a documentation
-/// window is left alone. Windows are tracked as offsets from the farm's top-left corner, so the game recentering its workspace
-/// container does not matter.
+/// Keeps the code windows around the farm (see <see cref="Layout"/>): running or focused windows open, the rest fold, and
+/// all glide to their places. Windows docked together are one unit, moved by their top window; a group holding a
+/// documentation window is left alone. Windows are tracked as offsets from the farm's top-left corner, so the game
+/// recentering its workspace container does not matter.
 /// </summary>
 public sealed class CodeWindowArranger : MonoBehaviour
 {
@@ -126,7 +123,7 @@ public sealed class CodeWindowArranger : MonoBehaviour
         }
 
         var changed = RunningChanged(space);
-        changed |= FarmResized(main!);
+        changed |= FarmResized();
         changed |= TypingStopped();
         if (changed || rearrange) pending = true;
         rearrange = false;
@@ -146,9 +143,9 @@ public sealed class CodeWindowArranger : MonoBehaviour
     }
 
     // The size of the farm being shown, so expanding, set_world_size(), a Run restoring it and simulate() are all seen.
-    bool FarmResized(MainSim main)
+    bool FarmResized()
     {
-        var size = main.GetRenderPackage()?.groundData?.sizexy;
+        var size = FarmBounds.Size();
         if (size == null) return false;
         var changed = farmSize != null && farmSize != size;
         farmSize = size;
@@ -194,9 +191,9 @@ public sealed class CodeWindowArranger : MonoBehaviour
             foreach (var code in group)
             {
                 var window = code.GetComponent<Window>();
-                var state = (code.isExecuting, code.CodeInput.isFocused);
+                var state = (Running: code.isExecuting, Focused: code.CodeInput != null && code.CodeInput.isFocused);
                 decided[code] = state;
-                if (Layout.IsExpanded(state.isExecuting, state.isFocused))
+                if (Layout.IsExpanded(state.Running, state.Focused))
                 {
                     if (window.isMinimized) window.SetMinmized(false);
                     window.playerSetSize = Vector2.zero;

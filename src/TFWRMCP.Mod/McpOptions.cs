@@ -12,7 +12,8 @@ namespace TFWRMCP.Mod;
 /// <summary>
 /// The "MCP" tab of the game's options menu. Its rows are the game's own cycle and slider rows, rewired to the BepInEx
 /// config instead of options.txt: port (slider hidden, text field only), server status with a restart button, and the
-/// switch that keeps Unlock docs from opening.
+/// on/off switches for suppressing Unlock docs, the resource bar at bottom center, auto-arranging code windows and
+/// auto-centering the camera.
 /// </summary>
 public static class McpOptions
 {
@@ -75,14 +76,18 @@ public static class McpOptions
         port.stepSize = 1;
         var server = Row(cycle, ServerRow, -1001);
         server.options = new List<string> { "" };
-        var docs = Row(cycle, DocsRow, -1002);
-        docs.options = new List<string> { "enabled", "disabled" };
-        var bar = Row(cycle, ResourceBarRow, -1003);
-        bar.options = new List<string> { "enabled", "disabled" };
-        var arrange = Row(cycle, ArrangeRow, -1004);
-        arrange.options = new List<string> { "enabled", "disabled" };
-        var camera = Row(cycle, CameraRow, -1005);
-        camera.options = new List<string> { "enabled", "disabled" };
+
+        CycleOptionSO Switch(string name, float importance)
+        {
+            var row = Row(cycle, name, importance);
+            row.options = new List<string> { "enabled", "disabled" };
+            return row;
+        }
+
+        var docs = Switch(DocsRow, -1002);
+        var bar = Switch(ResourceBarRow, -1003);
+        var arrange = Switch(ArrangeRow, -1004);
+        var camera = Switch(CameraRow, -1005);
         return new List<OptionSO> { port, server, docs, bar, arrange, camera };
     }
 

@@ -34,7 +34,7 @@ public sealed class ResourceBarPlacement : MonoBehaviour
     void Apply()
     {
         var main = MainSim.Inst;
-        var current = (object)main == null || main.inv == null ? null : main.inv.transform as RectTransform;
+        var current = main == null || main.inv == null ? null : main.inv.transform as RectTransform;
         // A Save switch reloads the scene: the old bar is gone, the new one is the game's again.
         if (current != bar)
         {

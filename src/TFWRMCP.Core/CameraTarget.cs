@@ -23,7 +23,8 @@ public static class CameraTarget
 {
     /// <summary>
     /// Centers the farm and zooms so that the range around its center that reaches the farthest edge of the farm or of any
-    /// window, mirrored on both sides, fills the viewport minus the resource bar's <paramref name="barHeight"/>.
+    /// window, mirrored on both sides, fills the viewport minus the resource bar's <paramref name="barHeight"/> at the bottom
+    /// and, the range being centered on screen, the same room at the top.
     /// All lengths are container units at zoom 1, with <paramref name="viewportWidth"/> and <paramref name="viewportHeight"/> the screen's.
     /// </summary>
     public static CameraView Fit(Box farm, IEnumerable<Box> windows, float viewportWidth, float viewportHeight, float barHeight, float minZoom, float maxZoom)
@@ -38,7 +39,7 @@ public static class CameraTarget
             halfHeight = Math.Max(halfHeight, Math.Max(y - window.Bottom, window.Top - y));
         }
 
-        var zoom = Math.Min(Room(viewportWidth, halfWidth), Room(viewportHeight - barHeight, halfHeight));
+        var zoom = Math.Min(Room(viewportWidth, halfWidth), Room(viewportHeight - 2 * barHeight, halfHeight));
         return new CameraView(x, y, Math.Min(maxZoom, Math.Max(minZoom, zoom)));
     }
 

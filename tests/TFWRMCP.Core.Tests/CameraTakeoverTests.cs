@@ -49,7 +49,7 @@ public class CameraTakeoverTests
     {
         var camera = new CameraTakeover();
         camera.PlayerOperated(now: 100);
-        camera.FarmResized();
+        camera.FarmChanged();
 
         Assert.True(camera.InControl(101));
     }
@@ -59,11 +59,11 @@ public class CameraTakeoverTests
     {
         var camera = new CameraTakeover();
         camera.PlayerOperated(now: 100);
-        camera.LeaderboardRunStarted();
+        camera.FarmChanged();
         Assert.True(camera.InControl(101));
 
         camera.PlayerOperated(now: 102);
-        camera.LeaderboardRunEnded();
+        camera.FarmChanged();
         Assert.True(camera.InControl(103));
     }
 }
