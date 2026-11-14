@@ -32,6 +32,14 @@ _避免_: 运行中的文件、活动窗口
 由 `leaderboard_run()` 在临时农场上发起的计时 Run，其结果会提交到 Steam 排行榜。
 _避免_: Benchmark、排位赛
 
+**临时农场**:
+Leaderboard Run 与模拟 Run 所用的农场；结束即丢弃，不改变 Save。
+_避免_: 子模拟、沙盒、测试农场
+
+**模拟 Run**:
+在临时农场上、用指定的 Unlock 和物品执行一个 Script 的 Run，由 Script 调用 `simulate()` 或 Agent 通过 Tool 发起；期间真实农场暂停。
+_避免_: Simulation、测速、Benchmark
+
 **Save**:
 保存物品、Unlock 和 Script 的游戏存档；同一时间只有一个处于激活状态。
 _避免_: 槽位、Profile、世界
