@@ -275,7 +275,7 @@ def check_grant_unlocks(mcp):
     # Everything the later Scripts use, so they pass whatever Save the smoke started from.
     grant_unlocks(mcp, {
         "debug", "costs", "simulation", "leaderboard", "dictionaries", "unlocks", "loops", "true", "expand_2",
-        "operators", "variables", "plant", "entities", "items", "senses", "watering",
+        "operators", "variables", "plant", "entities", "items", "senses", "watering", "timing",
     })
 
 
@@ -633,7 +633,87 @@ def check_get_state_during_simulate(mcp):
     finally:
         ok(mcp, "stop_run")
     for key in before:
-        assert during[key] == before[key], f"get_state {key} during simulate() is not the real farm's"
+        assert during[key] == before[key], f"get_state {key} during simulate() is not the real farm's: {before[key]} vs {during[key]}"
+
+
+def check_simulate_script(mcp):
+    def clock():  # the real farm's game clock, as a Script reads it
+        return float(ok(mcp, "run_script", name="smoke_clock", timeout_seconds=30)["output"][0])
+
+    def inventory():
+        return ok(mcp, "get_state", fields=["inventory"])["inventory"]
+
+    ok(mcp, "write_script", name="smoke_clock", code="print(get_time())\n")
+    ok(mcp, "write_script", name="smoke_sim_hay", code="while True:\n    if can_harvest():\n        harvest()\n")
+
+    # A Save without the simulation Unlock is refused, whatever the Script is.
+    ok(mcp, "load_save", name=mcp.other_save)
+    fails(mcp, "simulate_script", "simulation", name="smoke_sim_hay", game_seconds=10)
+    ok(mcp, "load_save", name=mcp.test_save)
+    for bad in (0, -1, "10"):
+        fails(mcp, "simulate_script", "game_seconds", name="smoke_sim_hay", game_seconds=bad)
+    fails(mcp, "simulate_script", "No Script named", name="smoke_no_such_script", game_seconds=10)
+    assert ok(mcp, "get_state", fields=["run"])["run"]["status"] != "running"
+
+    before = inventory()
+    run = ok(mcp, "simulate_script", name="smoke_sim_hay", game_seconds=300, timeout_seconds=120)
+    assert run["status"] == "finished" and run["simulated"] is True, run
+    assert 300 - 0.01 <= run["game_seconds"] <= 300.5, run["game_seconds"]
+    assert run["inventory_delta"].get("hay", 0) > 0 and run["rates"]["hay"] > 0 and run["ticks"] > 0, run
+    assert "failed_calls" not in run, run
+    assert ok(mcp, "get_state", fields=["run"])["run"]["simulated"] is True
+    assert ok(mcp, "wait_run")["simulated"] is True
+    print(f"    {run['game_seconds']} game seconds in {run['seconds']} s, inventory_delta {run['inventory_delta']}")
+
+    # The real farm keeps nothing of the simulation: same items (the game's own water, fertilizer and power aside).
+    after = inventory()
+    changed = {item for item in before if before[item] != after[item]}
+    assert after["hay"] == before["hay"] and changed <= {"water", "fertilizer", "power"}, (before, after)
+    assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
+
+    # A simulation that outlasts the timeout keeps going: get_state still shows the real farm, wait_run and stop_run apply,
+    # and the real farm's clock stands still for as long as it runs.
+    hay = inventory()["hay"]
+    clock_before, wall_before = clock(), time.time()
+    run = ok(mcp, "simulate_script", name="smoke_sim_hay", game_seconds=1e9, timeout_seconds=1)
+    assert run["status"] == "running" and run["simulated"] is True, run
+    fails(mcp, "wait_run", "simulated", until_inventory={"hay": 1}, timeout_seconds=0)
+    fails(mcp, "simulate_script", "stop_current", name="smoke_sim_hay", game_seconds=10)
+    try:
+        deadline = time.time() + 60
+        while True:
+            state = ok(mcp, "get_state", fields=["inventory", "run"])
+            assert state["inventory"]["hay"] == hay, "get_state during a simulation is not the real farm's"
+            if state["run"]["simulated"] and state["run"]["inventory_delta"].get("hay", 0) > 0:
+                break
+            assert time.time() < deadline, state["run"]
+            time.sleep(0.2)
+        assert ok(mcp, "wait_run", timeout_seconds=0)["simulated"] is True
+        time.sleep(4)
+    finally:
+        stopped = ok(mcp, "stop_run")
+    assert stopped["status"] == "stopped_by_tool" and stopped["simulated"] is True and stopped["game_seconds"] > 0, stopped
+    clock_after, wall = clock(), time.time() - wall_before
+    assert clock_after - clock_before < wall - 4, (clock_before, clock_after, wall)
+    assert inventory()["hay"] == hay
+    print(f"    real clock {clock_before} -> {clock_after} over {wall:.1f} s with a simulation of {stopped['game_seconds']} game seconds")
+
+    # stop_current stops a Run in progress first; the output of the earlier Run is gone.
+    ok(mcp, "write_script", name="smoke_sim_print", code="print('simulated')\nwhile True:\n    do_a_flip()\n")
+    run_wait(mcp, "smoke_loop", "print('real')\nwhile True:\n    do_a_flip()\n", timeout=1)
+    run = ok(mcp, "simulate_script", name="smoke_sim_print", game_seconds=5, stop_current=True, timeout_seconds=60)
+    assert run["status"] == "finished" and run["output"] == ["simulated"] and 5 - 0.01 <= run["game_seconds"] <= 5.5, run
+
+    # Errors: a syntax error starts nothing, a runtime error ends the simulation as error with its position.
+    ok(mcp, "write_script", name="smoke_sim_syntax", code="x = = 1\n")
+    run = ok(mcp, "simulate_script", name="smoke_sim_syntax", game_seconds=5)
+    assert run["status"] == "parse_error" and run["error"]["line"] == 1, run
+    ok(mcp, "write_script", name="smoke_sim_error", code="print('before')\nno_such_function()\n")
+    run = ok(mcp, "simulate_script", name="smoke_sim_error", game_seconds=5, timeout_seconds=30)
+    assert run["status"] == "error" and run["simulated"] is True and run["error"]["line"] == 2, run
+    assert run["output"][0] == "before" and len(run["output"]) == 2, run  # the game's error message follows
+    assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
+    assert "simulated" not in ok(mcp, "wait_run")
 
 
 # Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it more Unlocks.
@@ -644,7 +724,7 @@ CHECKS = [
     check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
     check_leaderboard_run, check_get_state_fields, check_until_inventory, check_tile_fields, check_run_summary,
     check_stop_on_failures,
-    check_get_state_during_simulate, check_save_switch_ends_run,
+    check_get_state_during_simulate, check_simulate_script, check_save_switch_ends_run,
 ]
 
 

@@ -88,6 +88,19 @@ how often `plant`, `harvest`, `move`, `swap`, `use_item`, `place`, `dig`, `push`
 `inventory_delta` is absent).
 Actions on the temporary farm of `simulate()` and leaderboard runs do not count.
 
+`simulate_script(name, game_seconds)` runs a Script as a simulated Run on a temporary farm that starts with the
+current Save's Unlocks and items, at the game's top speed, and ends it once the temporary farm's own clock has reached
+`game_seconds` (to within one op; status `finished`). It needs the `simulation` Unlock, the same as calling
+`simulate()` in a Script, and fails while a Run is in progress unless you pass `stop_current: true`. The temporary
+farm is thrown away afterwards, so the Save is untouched, **but the real farm is completely paused for as long as the
+simulation runs**: nothing grows or accumulates there meanwhile, and `get_state` keeps returning the real farm. The
+real duration depends on your CPU, so a long `game_seconds` can take minutes; `timeout_seconds` works as in
+`run_script`, and `wait_run` and `stop_run` apply to the simulated Run (the human can stop it on the overlay, too).
+Output is cleared when the simulation starts. The Run carries `simulated: true` (also in `wait_run` and `get_state`),
+and its summary counts the temporary farm only: `inventory_delta`, `rates` and `game_seconds` come from its items and
+clock, and it has no `failed_calls`. `wait_run` refuses `until_inventory` and `stop_when_met` for a simulated Run,
+because an inventory goal is about the real farm.
+
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.
 

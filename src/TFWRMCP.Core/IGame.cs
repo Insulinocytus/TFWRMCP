@@ -12,6 +12,7 @@ public static class Capabilities
     public const string Saves = "saves";
     public const string Scripts = "scripts";
     public const string Run = "run";
+    public const string Simulation = "simulation";
     public const string Unlock = "unlock";
     public const string Docs = "docs";
     public const string Builtins = "builtins";
@@ -96,6 +97,20 @@ public interface IGame
     /// </summary>
     Task<SyntaxError?> StartRun(string name, CancellationToken cancel);
 
+    /// <summary>
+    /// Starts a simulated Run of the Script on a temporary farm with the current Save's Unlocks and items, at the game's
+    /// top speed, and ends it once the temporary farm's clock reaches <paramref name="gameSeconds"/> (to within an op),
+    /// as a normal end. The real farm is paused meanwhile and is back by the time <see cref="RunEnded"/> is raised.
+    /// Clears the game's output first. Throws a <see cref="ToolException"/> when the Script does not exist or any Run is in
+    /// progress. Returns the syntax error when the Script does not parse, otherwise null once the Run has started
+    /// (<see cref="RunStarted"/> with Simulated has been raised by then). Throws <see cref="OperationCanceledException"/>
+    /// without starting anything when <paramref name="cancel"/> is cancelled by the time the game would act.
+    /// </summary>
+    Task<SyntaxError?> StartSimulation(string name, double gameSeconds, CancellationToken cancel);
+
+    /// <summary>The temporary farm of the simulated Run in progress; null when there is none.</summary>
+    Task<TemporaryFarm?> ReadTemporaryFarm();
+
     /// <summary>Same as the human clicking stop: ends the current Run (or Leaderboard Run); raises <see cref="RunEnded"/>.</summary>
     Task StopRun();
 
@@ -172,4 +187,17 @@ public sealed class BuiltinList
 
     /// <summary>Names not usable yet, by every Unlock that grants them.</summary>
     public Dictionary<string, List<UnlockGrant>> Locked { get; } = new();
+}
+
+/// <summary>A temporary farm as it is right now: its whole inventory and its game clock in seconds.</summary>
+public sealed class TemporaryFarm
+{
+    public Dictionary<string, double> Inventory { get; }
+    public double Seconds { get; }
+
+    public TemporaryFarm(Dictionary<string, double> inventory, double seconds)
+    {
+        Inventory = inventory;
+        Seconds = seconds;
+    }
 }
