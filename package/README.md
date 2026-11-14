@@ -30,6 +30,11 @@ The server only listens on localhost. Its settings are in the game's options men
   windows line up beside the farm: running and focused ones open at their content size in the left column, the rest
   fold in the right column, each sorted by name, and glide into place. Windows you moved by hand are overwritten at the
   next trigger; switching it off leaves them where they are. Docked windows are left alone. On by default.
+- **Auto-center camera on farm**: keeps the farm at the center of the screen and zooms so that the farm and every code
+  window fit (the resource bar's height is left out), within the game's own zoom limits. When the farm changes size
+  (an expand, `set_world_size()`, a Run ending) or a `simulate()` / Leaderboard Run farm comes or goes, or the windows
+  move, the camera glides to the new view over a second. While it is on it holds the camera; switching it off leaves
+  the camera where it is. On by default.
 
 ## Tools
 

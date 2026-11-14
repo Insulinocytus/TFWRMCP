@@ -17,6 +17,8 @@ public sealed class Plugin : BaseUnityPlugin
 
     public ConfigEntry<bool> AutoArrangeWindows { get; private set; } = null!;
 
+    public ConfigEntry<bool> AutoCenterCamera { get; private set; } = null!;
+
     /// <summary>Set when the server is not listening: why.</summary>
     public string? ServerError { get; private set; }
 
@@ -33,6 +35,8 @@ public sealed class Plugin : BaseUnityPlugin
             "Anchor the resource bar at the bottom center of the screen instead of the game's top left.");
         AutoArrangeWindows = Config.Bind("Layout", "AutoArrangeWindows", true,
             "Arrange the code windows around the farm whenever a Run starts or ends or a window joins it: running and focused windows open on the left, the rest fold on the right.");
+        AutoCenterCamera = Config.Bind("Layout", "AutoCenterCamera", true,
+            "Keep the farm at the center of the screen and zoom so that the farm and all code windows fit, gliding to the new view whenever the farm or the windows change.");
 
         var game = new GameAdapter(Logger.LogWarning, Logger.LogInfo, gameObject.AddComponent<InputLock>());
         server = new McpServer(game, Tools.Create(game, Logger.LogError), Port.Value, Logger.LogError);
@@ -42,6 +46,7 @@ public sealed class Plugin : BaseUnityPlugin
         gameObject.AddComponent<UnlockToastOverlay>().Install(this);
         gameObject.AddComponent<ResourceBarPlacement>().Install(this);
         gameObject.AddComponent<CodeWindowArranger>().Install(this);
+        gameObject.AddComponent<CameraAutoCenter>().Install(this);
         McpOptions.Install(this);
     }
 

@@ -22,6 +22,7 @@ public static class McpOptions
     const string DocsRow = "tfwrmcp unlock docs";
     const string ResourceBarRow = "tfwrmcp resource bar";
     const string ArrangeRow = "tfwrmcp arrange windows";
+    const string CameraRow = "tfwrmcp camera";
 
     static Plugin plugin = null!;
     static List<OptionSO>? rows;
@@ -80,7 +81,9 @@ public static class McpOptions
         bar.options = new List<string> { "enabled", "disabled" };
         var arrange = Row(cycle, ArrangeRow, -1004);
         arrange.options = new List<string> { "enabled", "disabled" };
-        return new List<OptionSO> { port, server, docs, bar, arrange };
+        var camera = Row(cycle, CameraRow, -1005);
+        camera.options = new List<string> { "enabled", "disabled" };
+        return new List<OptionSO> { port, server, docs, bar, arrange, camera };
     }
 
     // OptionMenu.ChangeCategory(string), postfix: the rows were just instantiated and wired to OptionHolder by the game.
@@ -122,6 +125,7 @@ public static class McpOptions
         Toggle(uis, DocsRow, zh ? "禁止解锁后自动弹出说明" : "Don't open docs after an unlock", plugin.SuppressUnlockDocs);
         Toggle(uis, ResourceBarRow, zh ? "资源栏底部居中" : "Resource bar at bottom center", plugin.ResourceBarAtBottom);
         Toggle(uis, ArrangeRow, zh ? "自动整理代码窗口" : "Auto-arrange code windows", plugin.AutoArrangeWindows);
+        Toggle(uis, CameraRow, zh ? "相机自动对准农场" : "Auto-center camera on farm", plugin.AutoCenterCamera);
     });
 
     static void Toggle(Dictionary<string, OptionUI> uis, string row, string title, BepInEx.Configuration.ConfigEntry<bool> entry)
