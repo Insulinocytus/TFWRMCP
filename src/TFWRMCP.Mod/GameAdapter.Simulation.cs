@@ -29,7 +29,7 @@ public sealed partial class GameAdapter
     void PatchSimulation(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null) =>
         Patch(type, method, warn, prefix, postfix, finalizer, Capabilities.Simulation, typeof(SimulatedRun));
 
-    public async Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel)
+    public async Task<SyntaxError?> StartSimulatedRun(string name, SimulatedRunOptions options, CancellationToken cancel)
     {
         var (error, started) = await MainThread.Run<(SyntaxError? Error, Task Started)>(() =>
         {

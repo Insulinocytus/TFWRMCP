@@ -7,7 +7,7 @@ public abstract class RunEvent { }
 
 /// <summary>
 /// A Run began, whoever started it. Output of earlier Runs is discarded. <paramref name="simulated"/> marks a simulated
-/// Run on a temporary farm (started by <see cref="IGame.StartSimulation"/>): <see cref="Inventory"/> is then that farm's.
+/// Run on a temporary farm (started by <see cref="IGame.StartSimulatedRun"/>): <see cref="Inventory"/> is then that farm's.
 /// </summary>
 public sealed class RunStarted : RunEvent
 {
@@ -30,7 +30,7 @@ public sealed class RunStarted : RunEvent
 /// The Script called an action (plant, harvest, move, swap, use_item, place, dig, push, unlock or hover), one event per
 /// call. <paramref name="failed"/> is set when it returned False, or was harvest() on an entity that is not harvestable
 /// (the game then returns True, clears the crop and yields nothing). Actions on the temporary farm of simulate() and
-/// Leaderboard Runs are never reported; those of a simulated Run started by <see cref="IGame.StartSimulation"/> are.
+/// Leaderboard Runs are never reported; those of a simulated Run started by <see cref="IGame.StartSimulatedRun"/> are.
 /// </summary>
 public sealed class ActionCalled : RunEvent
 {

@@ -26,7 +26,7 @@ public static class SimulatedRun
         // 1 until WarmupEnded has been raised; 0 from the start when there is no warmup.
         int warmupPending;
 
-        // Taken when the temporary farm's program ends, emitted once the real farm is back.
+        // Taken when the temporary farm's Script ends, emitted once the real farm is back.
         public volatile RunEnded? Ended;
 
         public Active(Simulation sim, Duration warmup, Duration deadline)
@@ -90,7 +90,7 @@ public static class SimulatedRun
         lockField = simulationLock;
     }
 
-    /// <summary>Completes once the game has started the simulation (RunStarted raised) and fails when it could not.</summary>
+    /// <summary>Completes once the game has started the simulated Run (RunStarted raised) and fails when it could not.</summary>
     public static Task Expect(string script, double warmupSeconds, double gameSeconds)
     {
         var pending = new Pending(script, warmupSeconds, gameSeconds);
@@ -109,8 +109,8 @@ public static class SimulatedRun
             if (__exception != null || __instance.storedSim == null || sim == null)
             {
                 pending.Started.TrySetException(new ToolException(__exception == null
-                    ? "The game did not start the simulation."
-                    : $"The game failed to start the simulation: {__exception.Message}"));
+                    ? "The game did not start the simulated Run."
+                    : $"The game failed to start the simulated Run: {__exception.Message}"));
                 return __exception;
             }
 

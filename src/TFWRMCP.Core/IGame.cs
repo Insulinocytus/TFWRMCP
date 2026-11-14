@@ -100,7 +100,7 @@ public interface IGame
     /// <summary>
     /// Starts a simulated Run of the Script on a temporary farm at the game's top speed: the current Save's Unlocks and
     /// items with <paramref name="options"/> applied on top, ended as a normal end once the temporary farm's clock
-    /// reaches <see cref="SimulationOptions.WarmupSeconds"/> + <see cref="SimulationOptions.GameSeconds"/> (to within an
+    /// reaches <see cref="SimulatedRunOptions.WarmupSeconds"/> + <see cref="SimulatedRunOptions.GameSeconds"/> (to within an
     /// op). <see cref="WarmupEnded"/> is raised when the clock first reaches the warmup, or just before
     /// <see cref="RunEnded"/> if the Run ends sooner; never when there is no warmup. The real farm is paused meanwhile
     /// and is back by the time <see cref="RunEnded"/> is raised. Clears the game's output first. Throws a
@@ -109,7 +109,7 @@ public interface IGame
     /// has been raised by then). Throws <see cref="OperationCanceledException"/> without starting anything when
     /// <paramref name="cancel"/> is cancelled by the time the game would act.
     /// </summary>
-    Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel);
+    Task<SyntaxError?> StartSimulatedRun(string name, SimulatedRunOptions options, CancellationToken cancel);
 
     /// <summary>The temporary farm of the simulated Run in progress; null when there is none.</summary>
     Task<TemporaryFarm?> ReadTemporaryFarm();
@@ -197,7 +197,7 @@ public sealed class BuiltinList
 /// the Save's Unlocks and items, levels against the Unlock's maximum; each entry replaces the Save's value and the
 /// rest is the Save's as it is.
 /// </summary>
-public sealed class SimulationOptions
+public sealed class SimulatedRunOptions
 {
     public double GameSeconds { get; set; }
 

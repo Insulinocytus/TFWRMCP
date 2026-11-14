@@ -27,7 +27,7 @@ public static partial class Tools
 
     const string SimulateSeedDescription =
         "Random seed of the temporary farm, an integer. The same seed, Script and parameters give the same " +
-        "simulation, so use it to remove randomness from an A/B comparison. Default -1 (any negative number): a " +
+        "simulated Run, so use it to remove randomness from an A/B comparison. Default -1 (any negative number): a " +
         "random seed.";
 
     const string SimulateWarmupDescription =
@@ -57,9 +57,9 @@ public static partial class Tools
     static bool IsNumber(JToken token) => token.Type is JTokenType.Integer or JTokenType.Float;
 
     /// <summary>Reads and checks every simulate_script parameter against the Save; throws before anything is started or stopped.</summary>
-    static SimulationOptions SimulationOptionsFrom(JObject args, GameState state)
+    static SimulatedRunOptions SimulatedRunOptionsFrom(JObject args, GameState state)
     {
-        var options = new SimulationOptions
+        var options = new SimulatedRunOptions
         {
             GameSeconds = args["game_seconds"] is { } seconds && IsNumber(seconds) && (double)seconds > 0 && double.IsFinite((double)seconds)
                 ? (double)seconds

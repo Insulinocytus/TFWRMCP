@@ -90,10 +90,10 @@ public sealed partial class FakeGame
     }
 
     /// <summary>The simulated Runs started so far: Script name and what was asked for.</summary>
-    public List<(string Name, SimulationOptions Options)> Simulations { get; } = new();
+    public List<(string Name, SimulatedRunOptions Options)> SimulatedRuns { get; } = new();
 
-    /// <summary>Runs synchronously inside StartSimulation once the Run has started.</summary>
-    public Action<string>? OnStartSimulation { get; set; }
+    /// <summary>Runs synchronously inside StartSimulatedRun once the Run has started.</summary>
+    public Action<string>? OnStartSimulatedRun { get; set; }
 
     /// <summary>The temporary farm's inventory and clock; tests change them by hand.</summary>
     public Dictionary<string, double> TemporaryInventory { get; set; } = new();
@@ -102,15 +102,15 @@ public sealed partial class FakeGame
 
     bool simulating;
 
-    public Task<SyntaxError?> StartSimulation(string name, SimulationOptions options, CancellationToken cancel)
+    public Task<SyntaxError?> StartSimulatedRun(string name, SimulatedRunOptions options, CancellationToken cancel)
     {
         cancel.ThrowIfCancellationRequested();
         if (!Scripts.ContainsKey(name)) throw new ToolException($"No Script named '{name}'.");
         if (RunActive) throw new ToolException("A Run is already in progress.");
         if (SyntaxErrors.TryGetValue(name, out var error)) return Task.FromResult<SyntaxError?>(error);
-        Simulations.Add((name, options));
+        SimulatedRuns.Add((name, options));
         Emit(new RunStarted(name, new Dictionary<string, double>(TemporaryInventory), simulated: true));
-        OnStartSimulation?.Invoke(name);
+        OnStartSimulatedRun?.Invoke(name);
         return Task.FromResult<SyntaxError?>(null);
     }
 

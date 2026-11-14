@@ -94,10 +94,10 @@ current Save's Unlocks and items, at the game's top speed, and ends it once the 
 `warmup_seconds + game_seconds` (to within one op; status `finished`). It needs the `simulation` Unlock, the same as
 calling `simulate()` in a Script, and fails while a Run is in progress unless you pass `stop_current: true`. The
 temporary farm is thrown away afterwards, so the Save is untouched, **but the real farm is completely paused for as
-long as the simulation runs**: nothing grows or accumulates there meanwhile, and `get_state` keeps returning the real
+long as the simulated Run runs**: nothing grows or accumulates there meanwhile, and `get_state` keeps returning the real
 farm. The real duration depends on your CPU, so a long `game_seconds` can take minutes; `timeout_seconds` works as in
 `run_script`, and `wait_run` and `stop_run` apply to the simulated Run (the human can stop it on the overlay, too).
-Output is cleared when the simulation starts. The Run carries `simulated: true` (also in `wait_run` and `get_state`),
+Output is cleared when the simulated Run starts. The Run carries `simulated: true` (also in `wait_run` and `get_state`),
 and its summary counts the temporary farm only: `inventory_delta`, `failed_calls`, `rates` and `game_seconds` come from
 its items, calls and clock. `wait_run` refuses `until_inventory` and `stop_when_met` for a simulated Run, because an
 inventory goal is about the real farm. Calls the Script makes to `simulate()` itself are not counted.
@@ -111,7 +111,7 @@ Parameters of `simulate_script` beyond `name`, `game_seconds`, `stop_current` an
   nothing is started or stopped.
 - `globals` (variable name to a number, string or boolean, e.g. `{"K": 4}`) defines variables in the Script's global
   scope before it starts, so one Script can be compared with different parameters without editing it.
-- `seed` (integer, default -1 = random) makes the simulation reproducible: the same seed, Script and parameters give
+- `seed` (integer, default -1 = random) makes the simulated Run reproducible: the same seed, Script and parameters give
   the same result.
 - `warmup_seconds` (default 0) lets the Script set its farm up first: the temporary farm runs `warmup_seconds`
   before the summary starts, and `inventory_delta`, `failed_calls`, `rates` and `game_seconds` then count only the
