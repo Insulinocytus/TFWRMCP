@@ -100,15 +100,21 @@ public static class RunHooks
         if (!startingLeaderboard && __instance.IsExecuting()) stopRequested = true;
     });
 
+    /// <summary>Tells a stopped Run from one that ran to its end, and clears the stop request.</summary>
+    internal static RunEnd ConsumeEnd()
+    {
+        var how = stopRequested ? RunEnd.Stopped : RunEnd.Terminated;
+        stopRequested = false;
+        return how;
+    }
+
     // Simulation.StopProgramExecution(), prefix: the end of the main simulation's Run, however it came about.
     public static void StopProgramExecution(Simulation __instance) => Safely(nameof(StopProgramExecution), () =>
     {
         if (__instance.leaderboardType != LeaderboardType.none || !__instance.IsExecuting() || !IsMainSim(__instance)) return;
         Volatile.Write(ref ticks, (long)__instance.Execution.GlobalOpCount);
         if (startingLeaderboard) return;
-        var how = stopRequested ? RunEnd.Stopped : RunEnd.Terminated;
-        stopRequested = false;
-        emit(new RunEnded(how, GameAdapter.Items(__instance.farm.Items, includeZero: true), Ticks));
+        emit(new RunEnded(ConsumeEnd(), GameAdapter.Items(__instance.farm.Items, includeZero: true), Ticks));
     });
 
     // MainSim.StartLeaderboard(LeaderboardStartArgs), prefix and finalizer.

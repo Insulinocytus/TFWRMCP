@@ -38,6 +38,7 @@ public sealed partial class GameAdapter : IGame
     {
         get
         {
+            if (SimulatedRun.Ticks is { } simulated) return simulated;
             var main = MainSim.Inst;
             if ((object)main == null || simField == null) return RunHooks.Ticks;
             var execution = (main.storedSim ?? (Simulation?)simField.GetValue(main))?.Execution;
@@ -76,6 +77,7 @@ public sealed partial class GameAdapter : IGame
 
         InstallScriptAndRunSupport(warn);
         ResolveUnlockDocs(warn);
+        InstallSimulationSupport(warn);
         ResolveBuiltins(warn);
     }
 
@@ -117,19 +119,20 @@ public sealed partial class GameAdapter : IGame
         Patch("Execution", "ApplySideEffect", warn, prefix: nameof(RunHooks.ActionBegin), postfix: nameof(RunHooks.ActionEnd));
     }
 
-    void Patch(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null)
+    void Patch(string type, string method, Action<string> warn, string? prefix = null, string? postfix = null, string? finalizer = null,
+        string capability = Capabilities.Run, Type? hooks = null)
     {
         var what = $"{type}.{method}";
-        var target = Resolve(Capabilities.Run, Method(type, method), what, warn);
+        var target = Resolve(capability, Method(type, method), what, warn);
         if (target == null) return;
-        HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(Method(typeof(RunHooks), name));
+        HarmonyMethod? Hook(string? name) => name == null ? null : new HarmonyMethod(Method(hooks ?? typeof(RunHooks), name));
         try
         {
             harmony.Patch(target, prefix: Hook(prefix), postfix: Hook(postfix), finalizer: Hook(finalizer));
         }
         catch (Exception e)
         {
-            Fail(Capabilities.Run, $"patching {what} failed ({e.Message})", warn);
+            Fail(capability, $"patching {what} failed ({e.Message})", warn);
         }
     }
 
@@ -277,8 +280,11 @@ public sealed partial class GameAdapter : IGame
 
         if (parseExceptionField!.GetValue(window) is not ParseException error)
             throw new ToolException($"The game did not start the Run of '{name}'.");
-        return new SyntaxError { Message = CodeUtilities.RemoveSyntaxTags(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
+        return SyntaxErrorOf(window, error);
     }, cancel);
+
+    static SyntaxError SyntaxErrorOf(CodeWindow window, ParseException error) =>
+        new() { Message = CodeUtilities.RemoveSyntaxTags(Localizer.Localize(error.Message)), Source = window.CodeInput.text, StartIndex = error.startIndex };
 
     public Task StopRun() => MainThread.Run(() =>
     {
