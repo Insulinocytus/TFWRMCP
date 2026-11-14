@@ -60,6 +60,66 @@ public class LayoutTests
         Assert.Equal(500 - 70 - 20, placed["y"]);
     }
 
+    static Unit Group(params Unit[] topFirst) => Layout.Group(topFirst);
+
+    [Fact]
+    public void A_dock_group_takes_the_height_of_all_its_windows_in_its_column()
+    {
+        var units = new[]
+        {
+            Group(Window("a", height: 100), Window("zz", height: 80)),
+            Window("b", height: 50),
+        };
+
+        var placed = Layout.Arrange(Farm, units).ToDictionary(p => p.Name, p => p.Top);
+
+        Assert.Equal(500, placed["a"]);
+        Assert.Equal(500 - 100 - 80 - 20, placed["b"]);
+        Assert.DoesNotContain("zz", placed.Keys);
+    }
+
+    [Fact]
+    public void A_dock_group_is_sorted_by_its_top_window_not_by_the_names_below_it()
+    {
+        var units = new[] { Window("b", height: 50), Group(Window("m", height: 10), Window("a", height: 10)) };
+
+        var placed = Layout.Arrange(Farm, units).ToDictionary(p => p.Name, p => p.Top);
+
+        Assert.Equal(500, placed["b"]);
+        Assert.Equal(500 - 50 - 20, placed["m"]);
+    }
+
+    [Fact]
+    public void A_dock_group_is_as_wide_as_its_widest_window_and_is_open_when_any_of_its_windows_is()
+    {
+        var group = Group(Window("top", width: 200), Window("under", width: 320, focused: true));
+
+        var placed = Layout.Arrange(Farm, new[] { group }).Single();
+
+        Assert.Equal(1000 - 20 - 320, placed.Left);
+    }
+
+    [Fact]
+    public void A_dock_group_of_idle_windows_goes_to_the_right_column()
+    {
+        var placed = Layout.Arrange(Farm, new[] { Group(Window("top"), Window("under")) }).Single();
+
+        Assert.Equal(1600 + 20, placed.Left);
+    }
+
+    [Fact]
+    public void Both_columns_move_outward_when_the_farm_grows()
+    {
+        var bigger = new Box(left: 800, top: 500, right: 1900, bottom: -400);
+        var units = new[] { Window("run", width: 300, running: true), Window("idle") };
+
+        var before = Layout.Arrange(Farm, units).ToDictionary(p => p.Name);
+        var after = Layout.Arrange(bigger, units).ToDictionary(p => p.Name);
+
+        Assert.Equal(before["run"].Left - 200, after["run"].Left);
+        Assert.Equal(before["idle"].Left + 300, after["idle"].Left);
+    }
+
     [Fact]
     public void Expanded_follows_running_or_focus()
     {
