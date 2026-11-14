@@ -10,10 +10,14 @@ public sealed class DocLink
     public string Page { get; }
     public string Title { get; }
 
-    public DocLink(string page, string title)
+    /// <summary>read_doc answers this page with the game's "you need to unlock X" placeholder.</summary>
+    public bool Locked { get; }
+
+    public DocLink(string page, string title, bool locked = false)
     {
         Page = page;
         Title = title;
+        Locked = locked;
     }
 }
 

@@ -72,6 +72,13 @@ now, and for every other name which Unlocks grant it and at what level (for exam
 earlier purchases). `plan_unlock` lists, without buying, every purchase needed to reach an Unlock level (parents and
 required levels first), their total cost and the items you still lack.
 
+`list_docs` lists the pages of the game's docs window; pass `include_locked: true` to also list pages for content
+not unlocked yet (marked `locked: true`; `read_doc` shows them as the game's "unlock X first" page). `read_doc` reads
+a page. Page ids come in two kinds: `unlocks/<name>`, `functions/<name>`, `items/<name>`, `objects/<name>` and
+`grounds/<name>` are generated from the game's texts (`unlocks/<name>` shows the effect and the next level's cost),
+while `docs/....md` are tutorial pages whose names need not match an Unlock (the tutorial for `loops` is
+`docs/scripting/while.md`). Take ids from `list_docs` rather than building them.
+
 ## Input Lock
 
 While a tool call runs, the game ignores your mouse, keyboard, hotkeys and scroll wheel, and a lock icon shows in

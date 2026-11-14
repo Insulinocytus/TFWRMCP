@@ -71,6 +71,13 @@ public static partial class Tools
     static string RequiredString(JObject args, string name) =>
         OptionalString(args, name) ?? throw new ToolException($"'{name}' is required.");
 
+    static bool OptionalBool(JObject args, string name)
+    {
+        var value = args[name];
+        if (value == null || value.Type == JTokenType.Null) return false;
+        return value.Type == JTokenType.Boolean ? (bool)value : throw new ToolException($"'{name}' must be true or false.");
+    }
+
     static async Task<object?> LoadAndWait(IGame game, RunTracker runs, string name, CancellationToken cancel)
     {
         await runs.ResetForReload(StopTimeout, cancel);

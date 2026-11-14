@@ -52,10 +52,7 @@ public static partial class Tools
     /// <summary>Reads until_inventory and stop_when_met; null when the Agent asked for no inventory condition.</summary>
     static async Task<InventoryGoal?> InventoryGoalFrom(JObject args, IGame game)
     {
-        var stop = args["stop_when_met"];
-        if (stop != null && stop.Type != JTokenType.Null && stop.Type != JTokenType.Boolean)
-            throw new ToolException("'stop_when_met' must be true or false.");
-        var stopWhenMet = stop != null && (bool)stop;
+        var stopWhenMet = OptionalBool(args, "stop_when_met");
 
         var token = args["until_inventory"];
         if (token == null || token.Type == JTokenType.Null)

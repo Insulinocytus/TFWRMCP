@@ -11,6 +11,8 @@ namespace TFWRMCP.Mod;
 
 public sealed partial class GameAdapter
 {
+    const string HomePage = "docs/home.md";
+
     void ResolveUnlockDocs(Action<string> warn)
     {
         ResolveMethods(Capabilities.Unlock, warn,
@@ -111,17 +113,23 @@ public sealed partial class GameAdapter
         };
     }
 
-    public Task<string> ReadDoc(string page) => MainThread.Run(() => RenderDoc(page));
+    public Task<string> ReadDoc(string page) => MainThread.Run(() => RenderDoc(page, false));
 
-    static string RenderDoc(string doc)
+    /// <param name="keepLockedSections">Keep the &lt;unlock=X&gt; sections the docs window drops for locked Unlocks.</param>
+    static string RenderDoc(string doc, bool keepLockedSections)
     {
         var main = MainSim.Inst;
         if (main == null) throw new ToolException(SceneLoading);
 
         var text = DocSource(doc) ?? throw new ToolException(
             $"No doc page '{doc}'. Page ids are listed by list_docs (for example docs/home.md, functions/harvest, unlocks/plant).");
-        return DocMarkup.Render(text, main.IsUnlocked, Localizer.Localize, PlatformManager.IsDlcInstalled(EDlcType.Mining), ItemBlockSection);
+        return DocMarkup.Render(text, keepLockedSections ? _ => true : main.IsUnlocked, Localizer.Localize,
+            PlatformManager.IsDlcInstalled(EDlcType.Mining), ItemBlockSection);
     }
+
+    public Task<IReadOnlyList<DocLink>> ListDocs(bool includeLocked) => MainThread.Run(() =>
+        (IReadOnlyList<DocLink>)DocMarkup.Links(RenderDoc(HomePage, includeLocked))
+            .Select(l => new DocLink(l.Page, l.Title, MissingUnlock(l.Page) != null)).ToList());
 
     /// <summary>Mirrors DocsWindow.DisplayDoc (placeholder for locked pages, generated pages, files); null when the page does not exist.</summary>
     static string? DocSource(string doc)

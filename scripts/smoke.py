@@ -423,11 +423,20 @@ def check_docs(mcp):
     pages = [p["page"] for p in listing["pages"]]
     assert len(pages) == len(set(pages)) and all(p["title"] for p in listing["pages"]), listing
     assert "docs/getting_started.md" in pages and "docs/scripting/for.md" not in pages, pages
+    assert not any("locked" in p for p in listing["pages"]), listing
 
-    for page in pages:  # everything listed is unlocked, so it reads as a real page, not the placeholder
-        is_error, doc = mcp.call("read_doc", page=page)
-        assert not is_error and doc["page"] == page and doc["content"].strip(), (page, doc)
-        assert "(tech_tree)" not in doc["content"] and "<noparse>" not in doc["content"], page
+    is_error, full = mcp.call("list_docs", include_locked=True)
+    assert not is_error, full
+    locked = {p["page"] for p in full["pages"] if p.get("locked")}
+    assert {"docs/unlocks/megafarm.md", "docs/scripting/for.md"} <= locked, locked
+    assert set(pages) <= {p["page"] for p in full["pages"] if not p.get("locked")}, full
+
+    # Locked pages read as the game's "unlock X first" page, which links to the tech tree; the others are real pages.
+    for p in full["pages"]:
+        is_error, doc = mcp.call("read_doc", page=p["page"])
+        assert not is_error and doc["page"] == p["page"] and doc["content"].strip(), (p, doc)
+        assert ("(tech_tree)" in doc["content"]) == bool(p.get("locked")), p
+        assert "<noparse>" not in doc["content"], p
 
     # Locked pages (file and generated) show the game's "unlock X first" page, which links to the tech tree.
     for page in ("docs/scripting/for.md", "functions/move", "objects/tree"):

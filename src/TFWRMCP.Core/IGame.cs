@@ -136,6 +136,12 @@ public interface IGame
     /// <summary>The page as the game's docs window shows it (placeholder for locked content); throws ToolException if there is no such page.</summary>
     Task<string> ReadDoc(string page);
 
+    /// <summary>
+    /// The pages the docs window's home page links to, once each in order, with Locked set as read_doc decides it.
+    /// Without <paramref name="includeLocked"/> the home page's sections for locked Unlocks are dropped like the game does.
+    /// </summary>
+    Task<IReadOnlyList<DocLink>> ListDocs(bool includeLocked);
+
     /// <summary>The names usable in a Script right now, and for the others which Unlocks grant them (and at which level).</summary>
     Task<BuiltinList> ListBuiltins();
 }

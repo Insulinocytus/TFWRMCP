@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using TFWRMCP;
 
@@ -10,6 +11,7 @@ public sealed partial class FakeGame
     public Dictionary<string, UnlockFacts> UnlockFacts { get; } = new();
     public bool UnlockRefused { get; set; }
     public Dictionary<string, string> Docs { get; } = new();
+    public List<DocLink> DocPages { get; } = new();
     public UnlockTree Tree { get; } = new();
 
     public Task<UnlockTree> GetUnlockTree() => Task.FromResult(Tree);
@@ -29,6 +31,9 @@ public sealed partial class FakeGame
 
     public Task<string> ReadDoc(string page) =>
         Docs.TryGetValue(page, out var text) ? Task.FromResult(text) : throw new ToolException($"No doc page '{page}'.");
+
+    public Task<IReadOnlyList<DocLink>> ListDocs(bool includeLocked) =>
+        Task.FromResult<IReadOnlyList<DocLink>>(DocPages.Where(p => includeLocked || !p.Locked).ToList());
 
     public BuiltinList Builtins { get; set; } = new();
 

@@ -8,7 +8,12 @@ namespace TFWRMCP;
 
 public static partial class Tools
 {
-    const string HomePage = "docs/home.md";
+    const string PageIdsDescription =
+        "There are two kinds of page id: unlocks/<name>, functions/<name>, items/<name>, objects/<name> and " +
+        "grounds/<name> are generated from the game's texts (unlocks/<name> shows what the Unlock does and the cost " +
+        "of its next level); docs/....md are the tutorial pages, whose file names need not match an Unlock (the " +
+        "tutorial for loops is docs/scripting/while.md, and docs/unlocks/loops.md does not exist). Take page ids from " +
+        "list_docs (include_locked lists the locked ones too) rather than building them.";
 
     static async Task<object?> Unlock(IGame game, string name)
     {
@@ -111,20 +116,25 @@ public static partial class Tools
         new Tool(
             "list_docs",
             "Lists the documentation pages in the game's docs window (what its home page links to, in the game's " +
-            "language). Pages for content you have not unlocked yet are not listed, but read_doc still answers them " +
-            "with the game's placeholder.",
-            Schema(),
-            async (_, _) =>
+            "language) as {page, title}. Pages for content you have not unlocked yet are left out unless include_locked " +
+            "is true; they then carry locked: true, and read_doc answers them with the game's placeholder. " + PageIdsDescription,
+            Schema(("include_locked", "boolean", "Also list pages for content not unlocked yet. Defaults to false.", false)),
+            async (args, _) =>
             {
-                var home = await game.ReadDoc(HomePage);
-                return new { pages = DocMarkup.Links(home).Select(l => new { page = l.Page, title = l.Title }) };
+                var pages = await game.ListDocs(OptionalBool(args, "include_locked"));
+                return new
+                {
+                    pages = pages.Select(p => p.Locked
+                        ? new JObject { ["page"] = p.Page, ["title"] = p.Title, ["locked"] = true }
+                        : new JObject { ["page"] = p.Page, ["title"] = p.Title }),
+                };
             },
             Capabilities.Docs),
         new Tool(
             "read_doc",
             "Reads a documentation page in the game's language, as the docs window shows it. Pass a page id from " +
             "list_docs, e.g. \"docs/scripting/for.md\" or \"functions/harvest\". Locked content returns the game's " +
-            "\"you need to unlock X\" page.",
+            "\"you need to unlock X\" page. " + PageIdsDescription,
             Schema(("page", "string", "Page id from list_docs.", true)),
             async (args, _) =>
             {

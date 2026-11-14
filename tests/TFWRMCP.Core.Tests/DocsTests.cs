@@ -7,20 +7,52 @@ namespace TFWRMCP.Core.Tests;
 
 public class DocsToolTests
 {
-    [Fact]
-    public async Task List_docs_returns_the_pages_linked_from_the_games_home_page_once_each()
+    static FakeGame GameWithPages()
     {
         var game = new FakeGame();
-        game.Docs["docs/home.md"] =
-            "## General\n<columns>\n[Credits](docs/credits.md)\n[Debug](docs/scripting/debug.md)\n</columns>\n" +
-            "## Functions\n<columns>\n[harvest()](functions/harvest)\n[Debug again](docs/scripting/debug.md)\n</columns>";
-        using var s = new TestServer(game);
+        game.DocPages.Add(new DocLink("docs/credits.md", "Credits"));
+        game.DocPages.Add(new DocLink("unlocks/megafarm", "Megafarm", locked: true));
+        game.DocPages.Add(new DocLink("functions/harvest", "harvest()"));
+        return game;
+    }
+
+    static (string Page, string Title, bool? Locked)[] Pages(string text) =>
+        JObject.Parse(text)["pages"]!.Select(p => ((string)p["page"]!, (string)p["title"]!, (bool?)p["locked"])).ToArray();
+
+    [Fact]
+    public async Task List_docs_lists_only_unlocked_pages_without_a_locked_flag_by_default()
+    {
+        using var s = new TestServer(GameWithPages());
 
         var (isError, text) = await s.Call("list_docs");
 
         Assert.False(isError);
-        var pages = JObject.Parse(text)["pages"]!.Select(p => ((string)p["page"]!, (string)p["title"]!)).ToArray();
-        Assert.Equal(new[] { ("docs/credits.md", "Credits"), ("docs/scripting/debug.md", "Debug"), ("functions/harvest", "harvest()") }, pages);
+        Assert.Equal(new (string, string, bool?)[] { ("docs/credits.md", "Credits", null), ("functions/harvest", "harvest()", null) }, Pages(text));
+    }
+
+    [Fact]
+    public async Task List_docs_with_include_locked_also_lists_locked_pages_marked_locked()
+    {
+        using var s = new TestServer(GameWithPages());
+
+        var (isError, text) = await s.Call("list_docs", new JObject { ["include_locked"] = true });
+
+        Assert.False(isError);
+        Assert.Equal(new (string, string, bool?)[]
+        {
+            ("docs/credits.md", "Credits", null), ("unlocks/megafarm", "Megafarm", true), ("functions/harvest", "harvest()", null),
+        }, Pages(text));
+    }
+
+    [Fact]
+    public async Task List_docs_rejects_a_non_boolean_include_locked()
+    {
+        using var s = new TestServer(GameWithPages());
+
+        var (isError, text) = await s.Call("list_docs", new JObject { ["include_locked"] = "yes" });
+
+        Assert.True(isError);
+        Assert.Contains("'include_locked' must be true or false", text);
     }
 
     [Fact]
@@ -110,5 +142,16 @@ public class DocMarkupTests
         var text = Render("Call <font=\"FiraCode-Regular SDF\"><noparse></noparse><color=#E6C87CFF><noparse>plant</noparse></color><noparse>()</noparse></font> now.");
 
         Assert.Equal("Call `plant()` now.", text);
+    }
+
+    [Fact]
+    public void Links_are_listed_in_order_once_per_page()
+    {
+        var links = DocMarkup.Links(
+            "## General\n<columns>\n[Credits](docs/credits.md)\n[Debug](docs/scripting/debug.md)\n</columns>\n" +
+            "## Functions\n<columns>\n[harvest()](functions/harvest)\n[Debug again](docs/scripting/debug.md)\n![img](x.png)</columns>");
+
+        Assert.Equal(new[] { ("docs/credits.md", "Credits"), ("docs/scripting/debug.md", "Debug"), ("functions/harvest", "harvest()") },
+            links.Select(l => (l.Page, l.Title)).ToArray());
     }
 }
