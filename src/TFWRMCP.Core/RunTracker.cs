@@ -96,6 +96,10 @@ public sealed class RunSnapshot
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public Dictionary<string, int>? FailedCalls { get; set; }
 
+    /// <summary>Only on a Run stopped by stop_on_failures: each function that failed the rule, with its failed calls in the 10 game seconds before the stop.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, int>? Failing { get; set; }
+
     /// <summary>Game steps the Run has executed; fixed once it has ended.</summary>
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public long? Ticks { get; set; }
@@ -146,6 +150,8 @@ public sealed class RunTracker
         public RunErrorInfo? Error;
         public LeaderboardOutcome? Leaderboard;
         public bool StopRequestedByTool;
+        public FailureWatch? Watch;
+        public Dictionary<string, int>? Failing;
         public readonly TaskCompletionSource<bool> Over = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Null for Runs that never started: they have no summary.
@@ -190,6 +196,7 @@ public sealed class RunTracker
     void OnEvent(RunEvent e)
     {
         var stopAfterError = false;
+        var stopForFailures = false;
         lock (gate)
         {
             if (e is SaveLoading)
@@ -215,6 +222,13 @@ public sealed class RunTracker
             {
                 case ActionCalled called:
                     if (called.Failed) current.Failed[called.Function] = current.Failed.GetValueOrDefault(called.Function) + 1;
+                    if (current.Watch is { } watch && watch.Observe(called.Function, called.Failed, game.GameSeconds))
+                    {
+                        current.Failing = watch.Failing(game.GameSeconds);
+                        current.Watch = null;
+                        current.StopRequestedByTool = true;
+                        stopForFailures = true;
+                    }
                     break;
                 case RunOutput output:
                     current.Output.Enqueue(output.Text);
@@ -249,6 +263,7 @@ public sealed class RunTracker
         }
 
         if (stopAfterError) _ = StopAfterError();
+        if (stopForFailures) _ = StopAfterFailures();
     }
 
     /// <summary>The game leaves a Run paused on a runtime error; stop it so the game is usable again and the Run ends as error.</summary>
@@ -256,6 +271,12 @@ public sealed class RunTracker
     {
         try { await game.StopRun(); }
         catch (Exception e) { log($"Stopping the Run after a runtime error failed: {e}"); }
+    }
+
+    async Task StopAfterFailures()
+    {
+        try { await game.StopRun(); }
+        catch (Exception e) { log($"Stopping the Run after failed calls failed: {e}"); }
     }
 
     /// <summary>Records a Run that never started because its Script does not parse.</summary>
@@ -299,6 +320,7 @@ public sealed class RunTracker
             Leaderboard = r.Leaderboard,
             Output = withOutput ? new List<string>(r.Output) : null,
             OutputDropped = withOutput ? r.Dropped : 0,
+            Failing = r.Status == RunStatus.StoppedByTool ? r.Failing : null,
         };
         if (r.Clock == null) return snapshot;
 
@@ -342,6 +364,13 @@ public sealed class RunTracker
         Record run;
         lock (gate) run = current;
         if (IsRunning(run)) _ = StopAtDeadline(run, run.StartGameSeconds + gameSeconds);
+    }
+
+    /// <summary>Stops the current Run on the Agent's behalf, like <see cref="StopAfterGameSeconds"/>, as soon as a function fails <paramref name="rule"/>; dropped when the Run ends or is replaced.</summary>
+    public void StopOnFailures(FailureRule rule)
+    {
+        lock (gate)
+            if (current.Status == RunStatus.Running) current.Watch = new FailureWatch(rule);
     }
 
     async Task StopAtDeadline(Record run, double deadline)
