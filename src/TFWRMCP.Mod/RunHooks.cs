@@ -151,25 +151,39 @@ public static class RunHooks
     /// <summary>What <see cref="ActionEnd"/> needs from before the action: it may end the Run and clear the drones' states.</summary>
     public struct ActionState
     {
-        public string? Function;
+        public ActionCalled[]? Calls;
         public ProgramState? Program;
         public bool Unharvestable;
     }
 
-    static string? ActionName(SideEffect effect)
+    // Events are immutable, so every call reuses one of these pairs (succeeded, failed) instead of allocating on the simulation thread.
+    static ActionCalled[] CallPair(string function) => new[] { new ActionCalled(function, false), new ActionCalled(function, true) };
+
+    static readonly ActionCalled[] PlantCalls = CallPair("plant");
+    static readonly ActionCalled[] HarvestCalls = CallPair("harvest");
+    static readonly ActionCalled[] MoveCalls = CallPair("move");
+    static readonly ActionCalled[] SwapCalls = CallPair("swap");
+    static readonly ActionCalled[] UseItemCalls = CallPair("use_item");
+    static readonly ActionCalled[] PlaceCalls = CallPair("place");
+    static readonly ActionCalled[] DigCalls = CallPair("dig");
+    static readonly ActionCalled[] PushCalls = CallPair("push");
+    static readonly ActionCalled[] UnlockCalls = CallPair("unlock");
+    static readonly ActionCalled[] HoverCalls = CallPair("hover");
+
+    static ActionCalled[]? ActionCalls(SideEffect effect)
     {
         switch (effect)
         {
-            case SideEffect.Plant: return "plant";
-            case SideEffect.Harvest: return "harvest";
-            case SideEffect.Move: return "move";
-            case SideEffect.Swap: return "swap";
-            case SideEffect.UseItem: return "use_item";
-            case SideEffect.Place: return "place";
-            case SideEffect.Dig: return "dig";
-            case SideEffect.Push: return "push";
-            case SideEffect.Unlock: return "unlock";
-            case SideEffect.Hover: return "hover";
+            case SideEffect.Plant: return PlantCalls;
+            case SideEffect.Harvest: return HarvestCalls;
+            case SideEffect.Move: return MoveCalls;
+            case SideEffect.Swap: return SwapCalls;
+            case SideEffect.UseItem: return UseItemCalls;
+            case SideEffect.Place: return PlaceCalls;
+            case SideEffect.Dig: return DigCalls;
+            case SideEffect.Push: return PushCalls;
+            case SideEffect.Unlock: return UnlockCalls;
+            case SideEffect.Hover: return HoverCalls;
             default: return null;
         }
     }
@@ -183,9 +197,9 @@ public static class RunHooks
             var sim = __instance.sim;
             if (sim.leaderboardType != LeaderboardType.none || !IsMainSim(sim)) return;
             var program = __instance.States[__0];
-            var function = ActionName(program.currentSideEffect);
-            if (function == null) return;
-            __state.Function = function;
+            var calls = ActionCalls(program.currentSideEffect);
+            if (calls == null) return;
+            __state.Calls = calls;
             __state.Program = program;
             // Harvesting something unripe returns True, so only the entity says whether it failed.
             __state.Unharvestable = program.currentSideEffect == SideEffect.Harvest && !sim.farm.drones[__0].CanHarvest();
@@ -199,10 +213,11 @@ public static class RunHooks
     // Execution.ApplySideEffect(int droneId), postfix; an action that throws a Script error never gets here.
     public static void ActionEnd(ActionState __state)
     {
-        if (__state.Function == null) return;
+        if (__state.Calls == null) return;
         try
         {
-            if (__state.Unharvestable || __state.Program!.ReturnValue is PyBool { num: 0 }) emit(new ActionFailed(__state.Function));
+            var failed = __state.Unharvestable || __state.Program!.ReturnValue is PyBool { num: 0 };
+            emit(__state.Calls[failed ? 1 : 0]);
         }
         catch (Exception e)
         {

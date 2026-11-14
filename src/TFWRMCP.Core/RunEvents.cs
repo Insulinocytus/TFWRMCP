@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace TFWRMCP;
 
-/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionFailed/Errored/LeaderboardFinished in any order, Ended.</summary>
+/// <summary>What the game reports about Runs; see <see cref="IGame.RunEvents"/>. Ordering within a Run is Started, Output/ActionCalled/Errored/LeaderboardFinished in any order, Ended.</summary>
 public abstract class RunEvent { }
 
 /// <summary>A Run began, whoever started it. Output of earlier Runs is discarded.</summary>
@@ -21,14 +21,20 @@ public sealed class RunStarted : RunEvent
 }
 
 /// <summary>
-/// The Script called an action that counts as failed: it returned False, or it was harvest() on an entity that is
-/// not harvestable (the game then returns True, clears the crop and yields nothing). Actions on the temporary farm
-/// of simulate() and Leaderboard Runs are never reported.
+/// The Script called an action (plant, harvest, move, swap, use_item, place, dig, push, unlock or hover), one event per
+/// call. <paramref name="failed"/> is set when it returned False, or was harvest() on an entity that is not harvestable
+/// (the game then returns True, clears the crop and yields nothing). Actions on the temporary farm of simulate() and
+/// Leaderboard Runs are never reported.
 /// </summary>
-public sealed class ActionFailed : RunEvent
+public sealed class ActionCalled : RunEvent
 {
     public string Function { get; }
-    public ActionFailed(string function) => Function = function;
+    public bool Failed { get; }
+    public ActionCalled(string function, bool failed)
+    {
+        Function = function;
+        Failed = failed;
+    }
 }
 
 /// <summary>One entry of the game's output, already cut to the game's per-entry limit.</summary>
