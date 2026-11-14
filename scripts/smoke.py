@@ -268,8 +268,8 @@ def grant_unlocks(mcp, extra, from_original=False):
 
 
 def check_grant_unlocks(mcp):
-    # A fresh Save lacks print/get_cost/simulate/leaderboards: give the test Save the original Save's Unlocks plus those.
-    grant_unlocks(mcp, {"debug", "costs", "simulation", "leaderboard"}, from_original=True)
+    # A fresh Save lacks print/get_cost/simulate/leaderboards/{} literals: give the test Save the original Save's Unlocks plus those.
+    grant_unlocks(mcp, {"debug", "costs", "simulation", "leaderboard", "dictionaries"}, from_original=True)
 
 
 def check_list_builtins(mcp):
@@ -536,13 +536,44 @@ def check_run_summary(mcp):
     assert ok(mcp, "wait_run")["seconds"] == again["seconds"] and ok(mcp, "get_state", fields=["run"])["run"]["ticks"] == again["ticks"]
 
 
+def check_get_state_during_simulate(mcp):
+    # The real farm differs from simulate()'s temporary one (1x1, drone at (0,0)): a bush under the drone, the test
+    # Save's Unlocks. shortcut: world_size and drones only differ when the original Save granted expand; grant
+    # expand and move the drone if that coverage matters.
+    assert run_wait(mcp, "smoke_real_bush", "clear()\nplant(Entities.Bush)\n")["status"] == "finished"
+
+    def snapshot():
+        state = ok(mcp, "get_state", fields=["inventory", "unlocks", "world_size", "drones", "tiles"])
+        state["tiles"] = [[(t["ground"], t.get("entity")) for t in row] for row in state["tiles"]]
+        return state
+
+    before = snapshot()
+    # Refused (maxed or unaffordable) outside simulate(), for the simulation during it: a side-effect-free probe.
+    probe = next(u["name"] for u in before["unlocks"] if u["next_cost"] is None
+                 or any(before["inventory"].get(i, 0) < n for i, n in u["next_cost"].items()))
+
+    ok(mcp, "write_script", name="smoke_sim_forever", code="while True:\n    do_a_flip()\n")
+    run = run_wait(mcp, "smoke_sim_state", "simulate('smoke_sim_forever', {}, {}, {}, 0, 1)\n", timeout=0)
+    assert run["status"] == "running", run
+    try:
+        deadline = time.time() + 30
+        while "simulate()" not in mcp.call("unlock", name=probe)[1]:
+            assert time.time() < deadline, "simulate() never started"
+            time.sleep(0.1)
+        during = snapshot()
+    finally:
+        ok(mcp, "stop_run")
+    for key in before:
+        assert during[key] == before[key], f"get_state {key} during simulate() is not the real farm's"
+
+
 # Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it the original Save's Unlocks.
 CHECKS = [
     check_handshake, check_tools_list, check_get_state, check_saves, check_unlock_failures, check_unlock_plan, check_docs,
     check_scripts, check_list_builtins, check_grant_unlocks, check_unlock_batch_and_costs, check_run_finishes,
     check_run_timeout_wait_stop, check_run_parse_error, check_run_runtime_error, check_run_output_buffer,
     check_leaderboard_run, check_get_state_fields, check_until_inventory, check_tile_fields, check_run_summary,
-    check_save_switch_ends_run,
+    check_get_state_during_simulate, check_save_switch_ends_run,
 ]
 
 

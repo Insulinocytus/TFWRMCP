@@ -284,24 +284,25 @@ public sealed partial class GameAdapter : IGame
         // The simulation thread mutates the grid under this lock.
         lock (lockField!.GetValue(main))
         {
-            var grid = sim.farm.grid;
+            // During simulate() and Leaderboard Runs the live sim is a temporary farm; the Agent's farm is the stored one.
+            var farm = (main.storedSim ?? sim).farm;
+            var grid = farm.grid;
             var size = grid.WorldSize;
             var state = new GameState();
             if (parts.HasFlag(StateParts.Save)) state.Save = ActiveSave();
-            // During simulate() and Leaderboard Runs the live sim is a temporary farm; the Agent's inventory is the stored one.
-            if (parts.HasFlag(StateParts.Inventory)) state.Inventory = Items((main.storedSim ?? sim).farm.Items, includeZero: true);
+            if (parts.HasFlag(StateParts.Inventory)) state.Inventory = Items(farm.Items, includeZero: true);
             if (parts.HasFlag(StateParts.WorldSize)) state.WorldSize = new Vec2 { X = size.x, Y = size.y };
 
             if (parts.HasFlag(StateParts.Unlocks))
                 foreach (var unlock in ListedUnlocks())
                 {
-                    var entry = Describe(unlock, main.NumUnlocked(unlock.unlockName));
-                    if (entry.Level < entry.MaxLevel) entry.NextCost = Items(main.GetUnlockCost(unlock), includeZero: false);
+                    var entry = Describe(unlock, farm.NumUnlocked(unlock.unlockName));
+                    if (entry.Level < entry.MaxLevel) entry.NextCost = Items(farm.GetUnlockCost(unlock), includeZero: false);
                     state.Unlocks.Add(entry);
                 }
 
             if (parts.HasFlag(StateParts.Drones))
-                foreach (var drone in sim.farm.drones.Where(d => d != null))
+                foreach (var drone in farm.drones.Where(d => d != null))
                     state.Drones.Add(new DroneState { Id = drone.DroneId, X = drone.pos.x, Y = drone.pos.y, Depth = drone.depth });
 
             if (parts.HasFlag(StateParts.Tiles))
