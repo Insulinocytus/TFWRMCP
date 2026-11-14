@@ -9,7 +9,10 @@ namespace TFWRMCP.Mod;
 /// While the config says so, holds the camera on the farm being shown (see <see cref="CameraTarget"/>): every frame the
 /// farm's rectangle is polled, and when the view that fits it and the code windows changes (the farm grew, shrank or was
 /// swapped for a temporary one, a window moved), the workspace's pan and zoom glide there over a second. The zoom is applied
-/// the way <c>Workspace.Zoom</c> applies it. A game member that is missing or not what it is assumed to be turns the feature off.
+/// the way <c>Workspace.Zoom</c> applies it. The player's own camera operations (WASD, scroll zoom off the windows, drag pan)
+/// take the camera from the Mod, see <see cref="CameraTakeover"/>. They are noticed in the game's input code, which does not
+/// run during the Input Lock, while the rest of this keeps working. A game member that is missing or not what it is assumed to
+/// be turns the feature off, or only the noticing of the operations it belongs to.
 /// </summary>
 public sealed class CameraAutoCenter : MonoBehaviour
 {
@@ -30,12 +33,24 @@ public sealed class CameraAutoCenter : MonoBehaviour
     float fromZoom, toZoom;
     double start;
 
+    static CameraAutoCenter? current;
+    static Vector2 panBefore;
+
+    readonly CameraTakeover takeover = new();
+    Vector2Int? farmSize;
+    bool simulating;
+
     // The one place that says whether the Mod owns the camera now.
-    bool InControl => true;
+    bool InControl => takeover.InControl(Time.unscaledTimeAsDouble);
 
     public void Install(Plugin owner)
     {
         plugin = owner;
+        current = this;
+        Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(Workspace), "Zoom"), "Workspace.Zoom", postfix: nameof(Operated));
+        Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(ScaledScrollRect), "OnDrag"), "ScaledScrollRect.OnDrag", prefix: nameof(Dragged));
+        Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(InputBoss), "Update"), "InputBoss.Update",
+            prefix: nameof(InputBegin), postfix: nameof(InputEnd));
         FarmBounds.Install();
         Patching.Safely(nameof(CameraAutoCenter), () =>
         {
@@ -63,7 +78,14 @@ public sealed class CameraAutoCenter : MonoBehaviour
     {
         var main = MainSim.Inst;
         var space = main == null ? null : main.workspace;
-        if (space == null || !plugin.AutoCenterCamera.Value || !InControl)
+        if (space == null || !plugin.AutoCenterCamera.Value)
+        {
+            glide = false;
+            return;
+        }
+
+        Track(main!);
+        if (!InControl)
         {
             glide = false;
             return;
@@ -104,6 +126,47 @@ public sealed class CameraAutoCenter : MonoBehaviour
             Tween.EaseOutExpo(fromPan.x, toPan.x, start, Duration, now),
             Tween.EaseOutExpo(fromPan.y, toPan.y, start, Duration, now)) - pan;
     }
+
+    // The farm's size and a temporary farm (Leaderboard Run, simulate()) are noticed here, not at their causes, so they count while the player holds the camera.
+    void Track(MainSim main)
+    {
+        var size = FarmBounds.Size();
+        if (size != farmSize)
+        {
+            farmSize = size;
+            takeover.FarmResized();
+        }
+
+        var temporary = main.storedSim != null;
+        if (temporary == simulating) return;
+        simulating = temporary;
+        if (temporary) takeover.LeaderboardRunStarted();
+        else takeover.LeaderboardRunEnded();
+    }
+
+    static RectTransform? Container()
+    {
+        var main = MainSim.Inst;
+        return main == null || main.workspace == null ? null : main.workspace.workspaceContainer;
+    }
+
+    // Workspace.Zoom(float), postfix: only the scroll over no window zooms the workspace, and nothing else here calls it.
+    static void Operated() => Patching.Safely(nameof(Operated), () => current?.takeover.PlayerOperated(Time.unscaledTimeAsDouble));
+
+    // ScaledScrollRect.OnDrag(PointerEventData), prefix: the workspace's drag pan, wherever the drag started.
+    static void Dragged(ScaledScrollRect __instance) => Patching.Safely(nameof(Dragged), () =>
+    {
+        if (__instance.content == Container()) Operated();
+    });
+
+    // InputBoss.Update(), prefix and postfix: WASD is the only thing in it that moves the container besides the zoom.
+    static void InputBegin() => Patching.Safely(nameof(InputBegin), () => panBefore = Container()?.anchoredPosition ?? default);
+
+    static void InputEnd() => Patching.Safely(nameof(InputEnd), () =>
+    {
+        var container = Container();
+        if (container != null && container.anchoredPosition != panBefore) Operated();
+    });
 
     // Workspace.Zoom without the cursor as the fixed point: the camera's zoom, the zoom container's scale and the margin.
     static void SetZoom(RectTransform content, CameraController camera, RectTransform zoomContainer, float zoom)
