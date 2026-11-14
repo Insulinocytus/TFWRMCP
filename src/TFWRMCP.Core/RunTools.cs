@@ -102,7 +102,7 @@ public static partial class Tools
         var atLeast = new Dictionary<string, double>();
         foreach (var item in items.Properties())
         {
-            if (item.Value.Type is not (JTokenType.Integer or JTokenType.Float) || (double)item.Value < 0)
+            if (!IsNumber(item.Value) || (double)item.Value < 0)
                 throw new ToolException($"'until_inventory' amount for '{item.Name}' must be a number that is not negative.");
             atLeast[item.Name] = (double)item.Value;
         }
@@ -122,7 +122,7 @@ public static partial class Tools
     {
         var token = args["timeout_seconds"];
         if (token == null || token.Type == JTokenType.Null) return TimeSpan.FromSeconds(DefaultTimeoutSeconds);
-        if (token.Type is not (JTokenType.Integer or JTokenType.Float))
+        if (!IsNumber(token))
             throw new ToolException("'timeout_seconds' must be a number.");
         var seconds = (double)token;
         if (double.IsNaN(seconds) || seconds < 0) throw new ToolException("'timeout_seconds' must not be negative.");
@@ -134,7 +134,7 @@ public static partial class Tools
         var token = args["stop_after_seconds"];
         if (token == null || token.Type == JTokenType.Null) return null;
         RequireGameClock(game, "stop_after_seconds");
-        if (token.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)token > 0))
+        if (!IsNumber(token) || !((double)token > 0))
             throw new ToolException("'stop_after_seconds' must be a number greater than 0.");
         return (double)token;
     }
@@ -160,7 +160,7 @@ public static partial class Tools
         var ratio = 0.5;
         if (rule["ratio"] is { Type: not JTokenType.Null } ratioToken)
         {
-            if (ratioToken.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)ratioToken > 0 && (double)ratioToken <= 1))
+            if (!IsNumber(ratioToken) || !((double)ratioToken > 0 && (double)ratioToken <= 1))
                 throw new ToolException("'stop_on_failures.ratio' must be a number greater than 0 and at most 1.");
             ratio = (double)ratioToken;
         }

@@ -86,12 +86,9 @@ public sealed partial class GameAdapter
             _ => new PyString((string)g.Value),
         })).ToList();
 
-    public Task<TemporaryFarm?> ReadTemporaryFarm() => MainThread.Run<TemporaryFarm?>(() =>
+    public Task<TemporaryFarm?> ReadTemporaryFarm() => MainThread.Run(() =>
     {
         var main = MainSim.Inst;
-        var run = SimulatedRun.Current;
-        if (run == null || (object)main == null) return null;
-        lock (lockField!.GetValue(main))
-            return new TemporaryFarm(Items(run.Sim.farm.Items, includeZero: true), run.Sim.CurrentTime.Seconds);
+        return (object)main == null ? null : SimulatedRun.Read(main);
     });
 }

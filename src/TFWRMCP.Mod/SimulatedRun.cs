@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -98,6 +99,17 @@ public static class SimulatedRun
         return pending.Started.Task;
     }
 
+    static Dictionary<string, double> Inventory(Simulation sim) => GameAdapter.Items(sim.farm.Items, includeZero: true);
+
+    /// <summary>The temporary farm of the simulated Run in progress as it is right now; null when there is none. Main thread only.</summary>
+    public static TemporaryFarm? Read(MainSim main)
+    {
+        var run = current;
+        if (run == null) return null;
+        lock (lockField!.GetValue(main))
+            return new TemporaryFarm(Inventory(run.Sim), run.Sim.CurrentTime.Seconds);
+    }
+
     // MainSim.StartLeaderboard(LeaderboardStartArgs), finalizer; runs in MainSim.Update, under the simulation lock.
     public static Exception? StartLeaderboardEnd(MainSim __instance, Exception? __exception)
     {
@@ -118,7 +130,7 @@ public static class SimulatedRun
             __instance.TimeFactor = TopSpeed;
             current = new Active(sim, Duration.FromSeconds(pending.WarmupSeconds),
                 Duration.FromSeconds(pending.WarmupSeconds + pending.GameSeconds));
-            emit(new RunStarted(pending.Script, GameAdapter.Items(sim.farm.Items, includeZero: true), simulated: true));
+            emit(new RunStarted(pending.Script, Inventory(sim), simulated: true));
             pending.Started.TrySetResult(true);
         }
         catch (Exception e)
@@ -158,7 +170,7 @@ public static class SimulatedRun
 
     static void EndWarmup(Active run, Simulation sim)
     {
-        if (run.TryEndWarmup()) emit(new WarmupEnded(GameAdapter.Items(sim.farm.Items, includeZero: true), sim.CurrentTime.Seconds));
+        if (run.TryEndWarmup()) emit(new WarmupEnded(Inventory(sim), sim.CurrentTime.Seconds));
     }
 
     // Simulation.StopProgramExecution(), prefix: the end of the temporary farm's Script, however it came about. A Script
@@ -170,7 +182,7 @@ public static class SimulatedRun
         try
         {
             EndWarmup(run, __instance);
-            run.Ended = new RunEnded(RunHooks.ConsumeEnd(), GameAdapter.Items(__instance.farm.Items, includeZero: true),
+            run.Ended = new RunEnded(RunHooks.ConsumeEnd(), Inventory(__instance),
                 (long)__instance.Execution.GlobalOpCount, __instance.CurrentTime.Seconds);
         }
         catch (Exception e)
