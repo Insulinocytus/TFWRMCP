@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 using Xunit;
@@ -252,5 +253,30 @@ public class RunSummaryTests
 
         Assert.Equal(before + 1, game.Calls);
         Assert.Equal(new JObject { ["wood"] = 4 }, state["run"]!["inventory_delta"]);
+    }
+
+    [Fact]
+    public async Task Action_calls_are_counted_without_waiting_for_a_Tool_that_is_describing_the_Run()
+    {
+        var game = GameWithScript();
+        using var s = new TestServer(game);
+        await Ok(s, "run_script", Run(timeout: 0));
+        using var describing = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        game.OnReadRunTicks = () =>
+        {
+            describing.Set();
+            release.Wait();
+        };
+
+        var described = Ok(s, "get_state", new JObject { ["fields"] = new JArray("run") });
+        Assert.True(describing.Wait(5000), "get_state never described the Run");
+        var call = Task.Run(() => game.Emit(new ActionCalled("move", failed: true)));
+        var counted = await Task.WhenAny(call, Task.Delay(2000)) == call;
+        release.Set();
+        await described;
+
+        Assert.True(counted, "an action call waited for the Tool describing the Run");
+        Assert.Equal(new JObject { ["move"] = 1 }, (await Ok(s, "wait_run", new JObject { ["timeout_seconds"] = 0 }))["failed_calls"]);
     }
 }

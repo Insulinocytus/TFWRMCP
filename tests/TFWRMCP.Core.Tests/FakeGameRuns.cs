@@ -24,7 +24,20 @@ public sealed partial class FakeGame
     public int StopCalls { get; private set; }
 
     /// <summary>Steps the Run has executed so far; a stopped Run reports the value it has then.</summary>
-    public long RunTicks { get; set; }
+    public long RunTicks
+    {
+        get
+        {
+            OnReadRunTicks?.Invoke();
+            return runTicks;
+        }
+        set => runTicks = value;
+    }
+
+    long runTicks;
+
+    /// <summary>Runs whenever RunTicks is read: a Tool is in the middle of describing the Run.</summary>
+    public Action? OnReadRunTicks { get; set; }
 
     /// <summary>The real farm's game clock; tests advance it by hand.</summary>
     public double GameSeconds { get; set; }
