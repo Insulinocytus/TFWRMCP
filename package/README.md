@@ -48,10 +48,12 @@ world size, drone positions, every tile as `tiles[y][x]` (`tiles[0][0]` is (0, 0
 its ground, entity, whether it can be harvested, water level and growth progress, and the Run status. It is large;
 pass `fields` (for example `["inventory","run"]`) to get only those top-level fields.
 
-`run_script` and `wait_run` end when the Run does, or after `timeout_seconds` (`0` returns right after the Run has
-started). Pass `until_inventory` (for example `{"carrot": 600}`) to also end as soon as the inventory holds at least
-that much of every item; the result then has `inventory` and `met`. With `stop_when_met` the Run is stopped at that
-moment, so "run until carrot ≥ 600, then stop" is a single call.
+`run_script` and `wait_run` end when the Run does, or after `timeout_seconds` (default 20, at most 600; `0` returns
+right after the Run has started). The call blocks that long, so keep it below your MCP client's request timeout (30
+seconds in many clients) and call `wait_run` again to keep waiting. Pass `until_inventory` (for example
+`{"carrot": 600}`) to also end as soon as the inventory holds at least that much of every item; the result then has
+`inventory` and `met`. With `stop_when_met` the Run is stopped at that moment, so "run until carrot ≥ 600, then stop"
+is a single call.
 
 Every Run (from `run_script`, `wait_run`, `stop_run` and `get_state`'s `run`) carries a summary so a script that spins
 without progress shows: `inventory_delta` (net change per item since the Run began, non-zero items only, covering

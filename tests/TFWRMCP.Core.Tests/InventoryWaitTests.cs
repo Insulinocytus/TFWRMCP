@@ -288,7 +288,11 @@ public class InventoryWaitTests
             var properties = tools[name]["inputSchema"]!["properties"]!;
             Assert.Equal("object", (string)properties["until_inventory"]!["type"]!);
             Assert.Equal("boolean", (string)properties["stop_when_met"]!["type"]!);
-            Assert.Contains("0", (string)properties["timeout_seconds"]!["description"]!);
+            var timeout = (string)properties["timeout_seconds"]!["description"]!;
+            Assert.Contains("default 20", timeout);
+            Assert.Contains("request timeout", timeout);
+            Assert.Contains("wait_run", timeout);
+            Assert.Contains("0", timeout);
         }
         Assert.Null(tools["run_script"]["inputSchema"]!["properties"]!["wait"]);
     }

@@ -9,13 +9,14 @@ namespace TFWRMCP;
 /// <summary>Script CRUD and Run Tools.</summary>
 public static partial class Tools
 {
-    const double DefaultTimeoutSeconds = 30;
+    const double DefaultTimeoutSeconds = 20;
     const double MaxTimeoutSeconds = 600;
 
     const string TimeoutDescription =
-        "How long to wait for the Run to end, in seconds (default 30, at most 600). When it is still running " +
-        "afterwards the result has status 'running' and the Run keeps going in the game. 0 does not wait: it " +
-        "returns right away.";
+        "How long to wait for the Run to end, in seconds (default 20, at most 600). The call blocks that long, so " +
+        "keep it below your MCP client's request timeout (30 seconds in many clients); to wait longer, call " +
+        "wait_run again. When the Run is still running afterwards the result has status 'running' and the Run " +
+        "keeps going in the game. 0 does not wait: it returns right away.";
 
     const string RunSummaryDescription =
         "inventory_delta (item name to net change since the Run began, non-zero items only: the farm's current " +
