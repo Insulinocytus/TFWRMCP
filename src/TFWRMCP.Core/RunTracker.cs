@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -77,6 +79,46 @@ public sealed class RunSnapshot
     /// <summary>Older output entries that no longer fit the buffer.</summary>
     [JsonProperty(DefaultValueHandling = DefaultValueHandling.Ignore)]
     public int OutputDropped { get; set; }
+
+    /// <summary>Only with an <see cref="InventoryGoal"/>: the whole inventory at the end of the wait.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, double>? Inventory { get; set; }
+
+    /// <summary>Only with an <see cref="InventoryGoal"/>: whether the inventory met it.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public bool? Met { get; set; }
+
+    /// <summary>Item name to net change since the Run began (the whole farm: Script, game and human alike), non-zero items only; absent when the Run's end inventory is unknown.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, double>? InventoryDelta { get; set; }
+
+    /// <summary>Function name to the number of failed calls, non-zero functions only.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, int>? FailedCalls { get; set; }
+
+    /// <summary>Game steps the Run has executed; fixed once it has ended.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public long? Ticks { get; set; }
+
+    /// <summary>Real time since the Run began; fixed once it has ended.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public double? Seconds { get; set; }
+}
+
+/// <summary>Wait until every item is at least its amount; with <see cref="StopWhenMet"/> the Run is stopped as soon as that holds.</summary>
+public sealed class InventoryGoal
+{
+    public Dictionary<string, double> AtLeast { get; }
+    public bool StopWhenMet { get; }
+
+    public InventoryGoal(Dictionary<string, double> atLeast, bool stopWhenMet)
+    {
+        AtLeast = atLeast;
+        StopWhenMet = stopWhenMet;
+    }
+
+    public bool IsMet(Dictionary<string, double> inventory) =>
+        AtLeast.All(item => inventory.TryGetValue(item.Key, out var have) && have >= item.Value);
 }
 
 /// <summary>
@@ -97,6 +139,13 @@ public sealed class RunTracker
         public LeaderboardOutcome? Leaderboard;
         public bool StopRequestedByTool;
         public readonly TaskCompletionSource<bool> Over = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Null for Runs that never started: they have no summary.
+        public Dictionary<string, double>? StartInventory;
+        public Stopwatch? Clock;
+        public readonly Dictionary<string, int> Failed = new();
+        public Dictionary<string, double>? EndInventory;
+        public long EndTicks;
     }
 
     readonly object gate = new();
@@ -124,16 +173,29 @@ public sealed class RunTracker
         var stopAfterError = false;
         lock (gate)
         {
+            if (e is SaveLoading)
+            {
+                current.Over.TrySetResult(true);
+                current = new Record();
+                return;
+            }
+
             if (e is RunStarted started)
             {
                 current.Over.TrySetResult(true);
-                current = new Record { Status = RunStatus.Running, Script = started.Script };
+                current = new Record
+                {
+                    Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
+                };
                 return;
             }
 
             if (current.Status != RunStatus.Running) return;
             switch (e)
             {
+                case ActionFailed failed:
+                    current.Failed[failed.Function] = current.Failed.GetValueOrDefault(failed.Function) + 1;
+                    break;
                 case RunOutput output:
                     current.Output.Enqueue(output.Text);
                     if (current.Output.Count > MaxOutput)
@@ -157,6 +219,9 @@ public sealed class RunTracker
                         current.Error != null ? RunStatus.Error :
                         ended.How == RunEnd.Terminated ? RunStatus.Finished :
                         current.StopRequestedByTool ? RunStatus.StoppedByTool : RunStatus.StoppedByUser;
+                    current.Clock!.Stop();
+                    current.EndInventory = ended.Inventory;
+                    current.EndTicks = ended.Ticks;
                     current.Over.TrySetResult(true);
                     break;
             }
@@ -188,46 +253,126 @@ public sealed class RunTracker
         }
     }
 
-    public RunSnapshot Snapshot(bool withOutput)
-    {
-        lock (gate) return Describe(current, withOutput);
-    }
-
-    static RunSnapshot Describe(Record r, bool withOutput) => new()
-    {
-        Status = r.Status,
-        Script = r.Script,
-        Error = r.Error,
-        Leaderboard = r.Leaderboard,
-        Output = withOutput ? new List<string>(r.Output) : null,
-        OutputDropped = withOutput ? r.Dropped : 0,
-    };
-
-    /// <summary>Waits for the Run to end for at most <paramref name="timeout"/>, then reports it with its output; throws if <paramref name="cancel"/> is cancelled.</summary>
-    public async Task<RunSnapshot> Wait(TimeSpan timeout, CancellationToken cancel)
+    /// <param name="live">The inventory the caller has just read, when it has one; saves reading it again.</param>
+    public Task<RunSnapshot> Snapshot(bool withOutput, Dictionary<string, double>? live = null)
     {
         Record run;
         lock (gate) run = current;
-        if (run.Status == RunStatus.Running)
+        return Report(run, withOutput, live);
+    }
+
+    /// <summary>Describes the Run; while it is running its inventory delta needs the current inventory, which <paramref name="live"/> may already hold.</summary>
+    async Task<RunSnapshot> Report(Record run, bool withOutput, Dictionary<string, double>? live = null)
+    {
+        if (live == null && IsRunning(run)) live = await ReadInventory();
+        lock (gate) return Describe(run, withOutput, live);
+    }
+
+    RunSnapshot Describe(Record r, bool withOutput, Dictionary<string, double>? live)
+    {
+        var snapshot = new RunSnapshot
         {
-            using var stopWaiting = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-            await Task.WhenAny(run.Over.Task, Task.Delay(timeout, stopWaiting.Token));
-            stopWaiting.Cancel();
-            cancel.ThrowIfCancellationRequested();
+            Status = r.Status,
+            Script = r.Script,
+            Error = r.Error,
+            Leaderboard = r.Leaderboard,
+            Output = withOutput ? new List<string>(r.Output) : null,
+            OutputDropped = withOutput ? r.Dropped : 0,
+        };
+        if (r.Clock == null) return snapshot;
+
+        var running = r.Status == RunStatus.Running;
+        var end = running ? live : r.EndInventory;
+        if (end != null)
+            snapshot.InventoryDelta = end.Keys.Union(r.StartInventory!.Keys)
+                .Select(item => (Item: item, Change: end.GetValueOrDefault(item) - r.StartInventory.GetValueOrDefault(item)))
+                .Where(c => c.Change != 0)
+                .ToDictionary(c => c.Item, c => c.Change);
+        snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
+        snapshot.Ticks = running ? game.RunTicks : r.EndTicks;
+        snapshot.Seconds = Math.Round(r.Clock.Elapsed.TotalSeconds, 3);
+        return snapshot;
+    }
+
+    static readonly TimeSpan InventoryPollInterval = TimeSpan.FromMilliseconds(100);
+
+    bool IsRunning(Record run)
+    {
+        lock (gate) return run.Status == RunStatus.Running;
+    }
+
+    async Task WaitOver(Record run, TimeSpan timeout, CancellationToken cancel)
+    {
+        using var stopWaiting = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        await Task.WhenAny(run.Over.Task, Task.Delay(timeout, stopWaiting.Token));
+        stopWaiting.Cancel();
+        cancel.ThrowIfCancellationRequested();
+    }
+
+    async Task<Dictionary<string, double>> ReadInventory() => (await game.GetState(StateParts.Inventory)).Inventory;
+
+    /// <summary>
+    /// Waits for the Run to end for at most <paramref name="timeout"/>, then reports it with its output; throws if
+    /// <paramref name="cancel"/> is cancelled. With a <paramref name="goal"/> it also ends once the goal is met (and
+    /// then stops the Run if asked to), and the result carries the inventory and whether the goal was met.
+    /// </summary>
+    public async Task<RunSnapshot> Wait(TimeSpan timeout, CancellationToken cancel, InventoryGoal? goal = null)
+    {
+        Record run;
+        lock (gate) run = current;
+        if (goal == null)
+        {
+            if (IsRunning(run)) await WaitOver(run, timeout, cancel);
+            return await Report(run, withOutput: true);
         }
-        lock (gate) return Describe(run, withOutput: true);
+
+        var clock = Stopwatch.StartNew();
+        Dictionary<string, double> inventory;
+        bool met;
+        while (true)
+        {
+            cancel.ThrowIfCancellationRequested();
+            inventory = await ReadInventory();
+            met = goal.IsMet(inventory);
+            var left = timeout - clock.Elapsed;
+            if (met || !IsRunning(run) || left <= TimeSpan.Zero) break;
+            await WaitOver(run, left < InventoryPollInterval ? left : InventoryPollInterval, cancel);
+        }
+
+        if (met && goal.StopWhenMet && IsRunning(run))
+        {
+            await StopByTool(run, Tools.StopTimeout, cancel);
+            inventory = await ReadInventory();
+        }
+        var snapshot = await Report(run, withOutput: true, inventory);
+        snapshot.Inventory = inventory;
+        snapshot.Met = met;
+        return snapshot;
     }
 
     /// <summary>Stops the Run in progress on the Agent's behalf and waits for it to end; with no Run in progress it only reports.</summary>
-    public async Task<RunSnapshot> StopByTool(TimeSpan timeout, CancellationToken cancel)
+    public Task<RunSnapshot> StopByTool(TimeSpan timeout, CancellationToken cancel)
     {
+        Record run;
+        lock (gate) run = current;
+        return StopByTool(run, timeout, cancel);
+    }
+
+    /// <summary>Only stops <paramref name="run"/> while it is still the current Run: it may have ended and been replaced since it was captured.</summary>
+    async Task<RunSnapshot> StopByTool(Record run, TimeSpan timeout, CancellationToken cancel)
+    {
+        bool stop;
         lock (gate)
         {
-            if (current.Status != RunStatus.Running) return Describe(current, withOutput: true);
-            current.StopRequestedByTool = true;
+            stop = run == current && run.Status == RunStatus.Running;
+            if (stop) run.StopRequestedByTool = true;
         }
-        await game.StopRun();
-        return await Wait(timeout, cancel);
+        if (stop)
+        {
+            await game.StopRun();
+            await WaitOver(run, timeout, cancel);
+        }
+        return await Report(run, withOutput: true);
     }
 
     /// <summary>A Run cannot outlive the loaded Save: stop it, then forget it.</summary>

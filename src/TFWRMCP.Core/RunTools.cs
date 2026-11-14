@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
 
 namespace TFWRMCP;
@@ -12,7 +14,68 @@ public static partial class Tools
 
     const string TimeoutDescription =
         "How long to wait for the Run to end, in seconds (default 30, at most 600). When it is still running " +
-        "afterwards the result has status 'running' and the Run keeps going in the game.";
+        "afterwards the result has status 'running' and the Run keeps going in the game. 0 does not wait: it " +
+        "returns right away.";
+
+    const string RunSummaryDescription =
+        "inventory_delta (item name to net change since the Run began, non-zero items only: the farm's current " +
+        "inventory, or its inventory when the Run ended, minus the inventory when it began, so it includes every " +
+        "change: Script actions, the game's own production and consumption such as water, fertilizer and power, " +
+        "Unlocks bought in the research menu and the cost of unlock() calls; absent when unknown), failed_calls " +
+        "(function name to count, non-zero only: a plant, harvest, move, swap, use_item, place, dig, push, " +
+        "unlock or hover call that returned False counts once; harvest() on an entity that is not harvestable " +
+        "also counts as a failed harvest, because the game then returns True, clears the crop and yields " +
+        "nothing; till() has no return value and is not counted), ticks (game steps the Run has executed, the " +
+        "unit of get_tick_count()) and seconds (real elapsed time); ticks and seconds stop growing when the Run " +
+        "ends. Actions and items on the temporary farm of simulate() and Leaderboard Runs do not count; Runs " +
+        "started by the human do. parse_error results have none of these. Use them to notice a Script that " +
+        "spins without progress, e.g. plant() failing on occupied tiles while items are consumed.";
+
+    const string UntilInventoryDescription =
+        "Item name to amount, e.g. {\"carrot\": 600}: the inventory must hold at least that much of every listed " +
+        "item. The wait then also ends as soon as this holds (or the Run ends, or the timeout passes), and the " +
+        "result gains inventory (the whole inventory) and met (whether it holds).";
+
+    const string StopWhenMetDescription =
+        "With until_inventory: stop the Run (like stop_run) as soon as the inventory meets it. Default false.";
+
+    static JObject WaitSchema(params (string Name, string Type, string Description, bool Required)[] properties) =>
+        WithSchema(Schema(properties.Concat(new[]
+            {
+                ("timeout_seconds", "number", TimeoutDescription, false),
+                ("until_inventory", "object", UntilInventoryDescription, false),
+                ("stop_when_met", "boolean", StopWhenMetDescription, false),
+            }).ToArray()),
+            "until_inventory", new JObject { ["additionalProperties"] = new JObject { ["type"] = "number", ["minimum"] = 0 } });
+
+    /// <summary>Reads until_inventory and stop_when_met; null when the Agent asked for no inventory condition.</summary>
+    static async Task<InventoryGoal?> InventoryGoalFrom(JObject args, IGame game)
+    {
+        var stop = args["stop_when_met"];
+        if (stop != null && stop.Type != JTokenType.Null && stop.Type != JTokenType.Boolean)
+            throw new ToolException("'stop_when_met' must be true or false.");
+        var stopWhenMet = stop != null && (bool)stop;
+
+        var token = args["until_inventory"];
+        if (token == null || token.Type == JTokenType.Null)
+            return stopWhenMet ? throw new ToolException("'stop_when_met' needs 'until_inventory'.") : null;
+        if (token is not JObject { Count: > 0 } items)
+            throw new ToolException("'until_inventory' must be an object with at least one item: {\"carrot\": 600}.");
+
+        var atLeast = new Dictionary<string, double>();
+        foreach (var item in items.Properties())
+        {
+            if (item.Value.Type is not (JTokenType.Integer or JTokenType.Float) || (double)item.Value < 0)
+                throw new ToolException($"'until_inventory' amount for '{item.Name}' must be a number that is not negative.");
+            atLeast[item.Name] = (double)item.Value;
+        }
+
+        var known = (await game.GetState(StateParts.Inventory)).Inventory;
+        var unknown = atLeast.Keys.FirstOrDefault(item => !known.ContainsKey(item));
+        if (unknown != null)
+            throw new ToolException($"Unknown item '{unknown}' in 'until_inventory'. Items: {string.Join(", ", known.Keys)}.");
+        return new InventoryGoal(atLeast, stopWhenMet);
+    }
 
     static TimeSpan WaitTimeout(JObject args)
     {
@@ -77,35 +140,38 @@ public static partial class Tools
             "(message, call stack and 1-based line/column; also for syntax errors, which return parse_error without " +
             "starting a Run) and, when the Script ran leaderboard_run(), leaderboard (reached_goal, average_seconds, " +
             "rank or null without Steam). A runtime error stops the Run automatically. The Leaderboard result page " +
-            "is closed automatically.",
-            Schema(("name", "string", "Script name (case-sensitive).", true),
-                ("timeout_seconds", "number", TimeoutDescription, false)),
+            "is closed automatically. To run until the inventory reaches a target, pass until_inventory (and " +
+            "stop_when_met to stop the Run then) instead of polling get_state. The Run also carries a summary: " +
+            RunSummaryDescription,
+            WaitSchema(("name", "string", "Script name (case-sensitive).", true)),
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
                 var timeout = WaitTimeout(args);
+                var goal = await InventoryGoalFrom(args, game);
                 var syntaxError = await game.StartRun(name, cancel);
-                if (syntaxError == null) return await runs.Wait(timeout, cancel);
-                runs.RecordSyntaxError(name, syntaxError);
-                return runs.Snapshot(withOutput: true);
+                if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
+                return await runs.Wait(timeout, cancel, goal);
             },
             Capabilities.Run),
         new Tool(
             "wait_run",
             "Waits again for the latest Run (see run_script) and returns it. When the Run has already ended it " +
-            "returns its final result immediately.",
-            Schema(("timeout_seconds", "number", TimeoutDescription, false)),
+            "returns its final result immediately. Takes the same until_inventory and stop_when_met as run_script, " +
+            "and returns the same Run, including its summary: " + RunSummaryDescription,
+            WaitSchema(),
             async (args, cancel) =>
             {
                 var timeout = WaitTimeout(args);
                 if (!runs.HasRun) throw new ToolException("No Run has been started yet.");
-                return await runs.Wait(timeout, cancel);
+                var goal = await InventoryGoalFrom(args, game);
+                return await runs.Wait(timeout, cancel, goal);
             },
             Capabilities.Run),
         new Tool(
             "stop_run",
             "Stops the Run in progress, as if the stop button was clicked, and returns it with status " +
-            "stopped_by_tool. With no Run in progress it just returns the latest Run unchanged.",
+            "stopped_by_tool, with the same summary as run_script: " + RunSummaryDescription + " With no Run in progress it just returns the latest Run unchanged.",
             Schema(),
             async (_, cancel) => await runs.StopByTool(StopTimeout, cancel),
             Capabilities.Run),

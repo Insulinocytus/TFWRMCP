@@ -10,6 +10,9 @@ public sealed partial class FakeGame
     public Dictionary<string, UnlockFacts> UnlockFacts { get; } = new();
     public bool UnlockRefused { get; set; }
     public Dictionary<string, string> Docs { get; } = new();
+    public UnlockTree Tree { get; } = new();
+
+    public Task<UnlockTree> GetUnlockTree() => Task.FromResult(Tree);
 
     public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot)
     {
@@ -26,4 +29,8 @@ public sealed partial class FakeGame
 
     public Task<string> ReadDoc(string page) =>
         Docs.TryGetValue(page, out var text) ? Task.FromResult(text) : throw new ToolException($"No doc page '{page}'.");
+
+    public BuiltinList Builtins { get; set; } = new();
+
+    public Task<BuiltinList> ListBuiltins() => Task.FromResult(Builtins);
 }

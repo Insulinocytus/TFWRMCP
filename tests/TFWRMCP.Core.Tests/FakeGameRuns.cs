@@ -20,6 +20,9 @@ public sealed partial class FakeGame
     public bool RunActive { get; private set; }
     public int StopCalls { get; private set; }
 
+    /// <summary>Steps the Run has executed so far; a stopped Run reports the value it has then.</summary>
+    public long RunTicks { get; set; }
+
     public event Action<RunEvent>? RunEvents;
 
     public void Emit(RunEvent e)
@@ -59,7 +62,7 @@ public sealed partial class FakeGame
         if (!Scripts.ContainsKey(name)) throw new ToolException($"No Script named '{name}'.");
         if (RunActive) throw new ToolException("A Run is already in progress.");
         if (SyntaxErrors.TryGetValue(name, out var error)) return Task.FromResult<SyntaxError?>(error);
-        Emit(new RunStarted(name));
+        Emit(new RunStarted(name, new Dictionary<string, double>(State.Inventory)));
         OnStartRun?.Invoke(name);
         return Task.FromResult<SyntaxError?>(null);
     }
@@ -67,7 +70,7 @@ public sealed partial class FakeGame
     public Task StopRun()
     {
         StopCalls++;
-        if (RunActive) Emit(new RunEnded(RunEnd.Stopped));
+        if (RunActive) Emit(new RunEnded(RunEnd.Stopped, new Dictionary<string, double>(State.Inventory), RunTicks));
         return Task.CompletedTask;
     }
 

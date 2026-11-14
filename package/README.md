@@ -27,11 +27,32 @@ The server only listens on localhost. Its settings are in the game's options men
 
 ## Tools
 
-`get_state` returns the Save name, inventory, Unlock levels and next costs, world size, drone positions, every
-tile's entity and ground, and the Run status.
+`get_state` returns the Save name, inventory, Unlock levels, next costs and prerequisites (`parent`, `also_requires`),
+world size, drone positions, every tile as `tiles[y][x]` (`tiles[0][0]` is (0, 0); y grows north, x grows east) with
+its ground, entity, whether it can be harvested, water level and growth progress, and the Run status. It is large;
+pass `fields` (for example `["inventory","run"]`) to get only those top-level fields.
+
+`run_script` and `wait_run` end when the Run does, or after `timeout_seconds` (`0` returns right after the Run has
+started). Pass `until_inventory` (for example `{"carrot": 600}`) to also end as soon as the inventory holds at least
+that much of every item; the result then has `inventory` and `met`. With `stop_when_met` the Run is stopped at that
+moment, so "run until carrot ≥ 600, then stop" is a single call.
+
+Every Run (from `run_script`, `wait_run`, `stop_run` and `get_state`'s `run`) carries a summary so a script that spins
+without progress shows: `inventory_delta` (net change per item since the Run began, non-zero items only, covering
+everything: script actions, the game's own production and consumption, Unlocks bought), `failed_calls` (per function,
+how often `plant`, `harvest`, `move`, `swap`, `use_item`, `place`, `dig`, `push`, `unlock` or `hover` returned
+`False`; `harvest()` on an unripe entity counts too, `till()` is not counted), `ticks` (game steps) and `seconds`.
+Actions on the temporary farm of `simulate()` and leaderboard runs do not count.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
 any tool runs, and tools called while the scene reloads wait until the game is playable again.
+
+`list_builtins` tells which functions, keywords and members (Entities, Items, Grounds, Hats) a script can use right
+now, and for every other name which Unlocks grant it and at what level (for example `for` needs `expand` level 2).
+
+`unlock` buys one level of an Unlock, or the Unlocks in `names` in order (it stops at the first failure and keeps
+earlier purchases). `plan_unlock` lists, without buying, every purchase needed to reach an Unlock level (parents and
+required levels first), their total cost and the items you still lack.
 
 ## Input Lock
 
