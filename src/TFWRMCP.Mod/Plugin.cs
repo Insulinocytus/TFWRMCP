@@ -13,6 +13,12 @@ public sealed class Plugin : BaseUnityPlugin
 
     public ConfigEntry<bool> SuppressUnlockDocs { get; private set; } = null!;
 
+    public ConfigEntry<bool> ResourceBarAtBottom { get; private set; } = null!;
+
+    public ConfigEntry<bool> AutoArrangeWindows { get; private set; } = null!;
+
+    public ConfigEntry<bool> AutoCenterCamera { get; private set; } = null!;
+
     /// <summary>Set when the server is not listening: why.</summary>
     public string? ServerError { get; private set; }
 
@@ -23,8 +29,14 @@ public sealed class Plugin : BaseUnityPlugin
         Port = Config.Bind("Server", "Port", 47821, new ConfigDescription(
             "Localhost port the MCP server listens on. Changes apply when the server is restarted from the game's MCP options.",
             new AcceptableValueRange<int>(1, 65535)));
-        SuppressUnlockDocs = Config.Bind("Game", "SuppressUnlockDocs", false,
+        SuppressUnlockDocs = Config.Bind("Game", "SuppressUnlockDocs", true,
             "Do not open an Unlock's documentation automatically when it is bought.");
+        ResourceBarAtBottom = Config.Bind("Layout", "ResourceBarAtBottom", true,
+            "Anchor the resource bar at the bottom center of the screen instead of the game's top left.");
+        AutoArrangeWindows = Config.Bind("Layout", "AutoArrangeWindows", true,
+            "Arrange the code windows around the farm whenever a Run starts or ends or a window joins it, a Script is created, deleted or renamed, the farm changes size or a window's line count changes: running and focused windows open on the left, the rest fold on the right.");
+        AutoCenterCamera = Config.Bind("Layout", "AutoCenterCamera", true,
+            "Keep the farm at the center of the screen and zoom so that the farm and all code windows fit, gliding to the new view whenever the farm or the windows change.");
 
         var game = new GameAdapter(Logger.LogWarning, Logger.LogInfo, gameObject.AddComponent<InputLock>());
         server = new McpServer(game, Tools.Create(game, Logger.LogError), Port.Value, Logger.LogError);
@@ -32,6 +44,9 @@ public sealed class Plugin : BaseUnityPlugin
 
         Patching.Configure(Logger.LogWarning);
         gameObject.AddComponent<UnlockToastOverlay>().Install(this);
+        gameObject.AddComponent<ResourceBarPlacement>().Install(this);
+        gameObject.AddComponent<CodeWindowArranger>().Install(this);
+        gameObject.AddComponent<CameraAutoCenter>().Install(this);
         McpOptions.Install(this);
     }
 

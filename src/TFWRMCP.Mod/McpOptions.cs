@@ -12,7 +12,8 @@ namespace TFWRMCP.Mod;
 /// <summary>
 /// The "MCP" tab of the game's options menu. Its rows are the game's own cycle and slider rows, rewired to the BepInEx
 /// config instead of options.txt: port (slider hidden, text field only), server status with a restart button, and the
-/// switch that keeps Unlock docs from opening.
+/// on/off switches for suppressing Unlock docs, the resource bar at bottom center, auto-arranging code windows and
+/// auto-centering the camera.
 /// </summary>
 public static class McpOptions
 {
@@ -20,6 +21,9 @@ public static class McpOptions
     const string PortRow = "tfwrmcp port";
     const string ServerRow = "tfwrmcp server";
     const string DocsRow = "tfwrmcp unlock docs";
+    const string ResourceBarRow = "tfwrmcp resource bar";
+    const string ArrangeRow = "tfwrmcp arrange windows";
+    const string CameraRow = "tfwrmcp camera";
 
     static Plugin plugin = null!;
     static List<OptionSO>? rows;
@@ -72,9 +76,19 @@ public static class McpOptions
         port.stepSize = 1;
         var server = Row(cycle, ServerRow, -1001);
         server.options = new List<string> { "" };
-        var docs = Row(cycle, DocsRow, -1002);
-        docs.options = new List<string> { "enabled", "disabled" };
-        return new List<OptionSO> { port, server, docs };
+
+        CycleOptionSO Switch(string name, float importance)
+        {
+            var row = Row(cycle, name, importance);
+            row.options = new List<string> { "enabled", "disabled" };
+            return row;
+        }
+
+        var docs = Switch(DocsRow, -1002);
+        var bar = Switch(ResourceBarRow, -1003);
+        var arrange = Switch(ArrangeRow, -1004);
+        var camera = Switch(CameraRow, -1005);
+        return new List<OptionSO> { port, server, docs, bar, arrange, camera };
     }
 
     // OptionMenu.ChangeCategory(string), postfix: the rows were just instantiated and wired to OptionHolder by the game.
@@ -113,18 +127,24 @@ public static class McpOptions
             Title(server).text = Status(zh);
         }
 
-        if (uis.TryGetValue(DocsRow, out var docsUi) && docsUi is CycleOptionUI docs)
-        {
-            string State() => plugin.SuppressUnlockDocs.Value ? "enabled" : "disabled";
-            Title(docs).text = zh ? "禁止解锁后自动弹出说明" : "Don't open docs after an unlock";
-            ColoredButton? button = null;
-            button = Rebind(docs, State(), () =>
-            {
-                plugin.SuppressUnlockDocs.Value = !plugin.SuppressUnlockDocs.Value;
-                button!.Text = State();
-            });
-        }
+        Toggle(uis, DocsRow, zh ? "禁止解锁后自动弹出说明" : "Don't open docs after an unlock", plugin.SuppressUnlockDocs);
+        Toggle(uis, ResourceBarRow, zh ? "资源栏底部居中" : "Resource bar at bottom center", plugin.ResourceBarAtBottom);
+        Toggle(uis, ArrangeRow, zh ? "自动整理代码窗口" : "Auto-arrange code windows", plugin.AutoArrangeWindows);
+        Toggle(uis, CameraRow, zh ? "相机自动对准农场" : "Auto-center camera on farm", plugin.AutoCenterCamera);
     });
+
+    static void Toggle(Dictionary<string, OptionUI> uis, string row, string title, BepInEx.Configuration.ConfigEntry<bool> entry)
+    {
+        if (!uis.TryGetValue(row, out var ui) || ui is not CycleOptionUI cycle) return;
+        string State() => entry.Value ? "enabled" : "disabled";
+        Title(cycle).text = title;
+        ColoredButton? button = null;
+        button = Rebind(cycle, State(), () =>
+        {
+            entry.Value = !entry.Value;
+            button!.Text = State();
+        });
+    }
 
     static ColoredButton Rebind(CycleOptionUI row, string text, Action clicked)
     {
