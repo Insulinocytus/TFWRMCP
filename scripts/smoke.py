@@ -4,7 +4,7 @@
 Launches the game through Steam unless MCP already answers, waits for the port, records the current Save, creates
 two throwaway Saves (smoke-<timestamp> and smoke-<timestamp>-other), runs every check on them, loads the original
 Save back at the very end (even if checks fail) and deletes the throwaway Saves. The original Save is never loaded
-mid-run; its Unlocks are read from its save.json. Prints PASS/FAIL per step. Exit code is 0 only if all steps pass.
+mid-run and its Unlocks do not matter. Prints PASS/FAIL per step. Exit code is 0 only if all steps pass.
 
 Usage: python scripts/smoke.py [--port 47821] [--startup-timeout 240] [--no-launch]
 
@@ -256,28 +256,27 @@ def check_run_output_buffer(mcp):
         len(run["output"]), run["output"][-1:], run.get("output_dropped"))
 
 
-def grant_unlocks(mcp, extra, from_original=False):
-    # Edit the test Save's Unlocks on disk (optionally adding the original Save's, which is only read, never loaded).
+def grant_unlocks(mcp, unlocks):
+    # Edit the test Save's Unlocks on disk: save.json lists names, with "<name>_<level>" past level 1.
     # A Save's file is rewritten when the game leaves it, so edit the test Save while the other throwaway Save is
     # loaded, then load it back.
     assert os.path.isdir(SAVES_DIR), f"Saves directory not found: {SAVES_DIR}"
     ok(mcp, "load_save", name=mcp.other_save)
-    unlocks = set(extra)
-    if from_original:
-        with open(os.path.join(SAVES_DIR, mcp.original_save, "save.json"), encoding="utf-8") as f:
-            unlocks |= set(json.load(f)["unlocks"])
     path = os.path.join(SAVES_DIR, mcp.test_save, "save.json")
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    data["unlocks"] = sorted(unlocks | set(data["unlocks"]))
+    data["unlocks"] = sorted(set(unlocks) | set(data["unlocks"]))
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
     ok(mcp, "load_save", name=mcp.test_save)
 
 
 def check_grant_unlocks(mcp):
-    # A fresh Save lacks print/get_cost/simulate/leaderboards/{} literals: give the test Save the original Save's Unlocks plus those.
-    grant_unlocks(mcp, {"debug", "costs", "simulation", "leaderboard", "dictionaries"}, from_original=True)
+    # Everything the later Scripts use, so they pass whatever Save the smoke started from.
+    grant_unlocks(mcp, {
+        "debug", "costs", "simulation", "leaderboard", "dictionaries", "unlocks", "loops", "true", "expand_2",
+        "operators", "variables", "plant", "entities", "items", "senses", "watering",
+    })
 
 
 def check_list_builtins(mcp):
@@ -555,8 +554,7 @@ def check_run_summary(mcp):
 
 def check_get_state_during_simulate(mcp):
     # The real farm differs from simulate()'s temporary one (1x1, drone at (0,0)): a bush under the drone, the test
-    # Save's Unlocks. shortcut: world_size and drones only differ when the original Save granted expand; grant
-    # expand and move the drone if that coverage matters.
+    # Save's Unlocks, the world grown by expand.
     assert run_wait(mcp, "smoke_real_bush", "clear()\nplant(Entities.Bush)\n")["status"] == "finished"
 
     def snapshot():
@@ -584,7 +582,7 @@ def check_get_state_during_simulate(mcp):
         assert during[key] == before[key], f"get_state {key} during simulate() is not the real farm's"
 
 
-# Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it the original Save's Unlocks.
+# Unlock/docs checks need the fresh test Save, so they run before check_grant_unlocks hands it more Unlocks.
 CHECKS = [
     check_handshake, check_tools_list, check_no_getting_started, check_get_state, check_saves, check_unlock_failures,
     check_unlock_plan, check_docs,
