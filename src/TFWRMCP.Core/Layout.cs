@@ -21,7 +21,7 @@ public readonly struct Box
     public float Bottom { get; }
 }
 
-/// <summary>What gets arranged: a code window now, a dock group later (named by whichever window sorts it).</summary>
+/// <summary>What gets arranged: a code window or a dock group (see <see cref="Layout.Group"/>).</summary>
 public readonly struct Unit
 {
     public Unit(string name, float width, float height, bool running, bool focused)
@@ -64,6 +64,13 @@ public static class Layout
 
     /// <summary>Windows that take part in a Run or have input focus are shown open; the rest are folded away.</summary>
     public static bool IsExpanded(bool running, bool focused) => running || focused;
+
+    /// <summary>
+    /// Docked windows, top one first, as one unit: named by the top window (which is what it sorts by and what moves), as wide
+    /// as the widest member and as tall as all of them together, open when any member is.
+    /// </summary>
+    public static Unit Group(IReadOnlyList<Unit> topFirst) => new(
+        topFirst[0].Name, topFirst.Max(u => u.Width), topFirst.Sum(u => u.Height), topFirst.Any(u => u.Running), topFirst.Any(u => u.Focused));
 
     /// <summary>
     /// Expanded units stack in a left column and the others in a right column, each sorted by name, tops on the farm's top,
