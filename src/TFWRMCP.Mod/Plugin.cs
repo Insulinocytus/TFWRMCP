@@ -34,7 +34,7 @@ public sealed class Plugin : BaseUnityPlugin
         ResourceBarAtBottom = Config.Bind("Layout", "ResourceBarAtBottom", true,
             "Anchor the resource bar at the bottom center of the screen instead of the game's top left.");
         AutoArrangeWindows = Config.Bind("Layout", "AutoArrangeWindows", true,
-            "Arrange the code windows around the farm whenever a Run starts or ends or a window joins it: running and focused windows open on the left, the rest fold on the right.");
+            "Arrange the code windows around the farm whenever a Run starts or ends or a window joins it, a Script is created, deleted or renamed, the farm changes size or a window's line count changes: running and focused windows open on the left, the rest fold on the right.");
         AutoCenterCamera = Config.Bind("Layout", "AutoCenterCamera", true,
             "Keep the farm at the center of the screen and zoom so that the farm and all code windows fit, gliding to the new view whenever the farm or the windows change.");
 
