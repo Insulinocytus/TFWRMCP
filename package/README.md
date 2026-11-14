@@ -44,9 +44,12 @@ The server only listens on localhost. Its settings are in the game's options men
 ## Tools
 
 `get_state` returns the Save name, inventory, Unlock levels, next costs and prerequisites (`parent`, `also_requires`),
-world size, drone positions, every tile as `tiles[y][x]` (`tiles[0][0]` is (0, 0); y grows north, x grows east) with
-its ground, entity, whether it can be harvested, water level and growth progress, and the Run status. It is large;
-pass `fields` (for example `["inventory","run"]`) to get only those top-level fields.
+world size, drone positions and the hat each drone wears (spelled as in `Hats`, e.g. `Straw_Hat`), every tile as
+`tiles[y][x]` (`tiles[0][0]` is (0, 0); y grows north, x grows east) with its ground, entity, whether it can be
+harvested, water level and growth progress, `entity_counts` (entity type → number of tiles holding it, so leftovers
+such as hedges are visible at a glance), and the Run status. It is large; pass `fields` (for example
+`["inventory","run"]`) to get only those top-level fields, and `unlocks` (for example `["loops","speed"]`) to get only
+those Unlocks; an unknown Unlock name is an error, and so is `unlocks` with `fields` that leave out `unlocks`.
 
 `run_script` and `wait_run` end when the Run does, or after `timeout_seconds` (default 20, at most 600; `0` returns
 right after the Run has started). The call blocks that long, so keep it below your MCP client's request timeout (30

@@ -128,7 +128,7 @@ public sealed partial class FakeGame : IGame
             },
         },
         WorldSize = new Vec2 { X = 2, Y = 2 },
-        Drones = { new DroneState { Id = 0, X = 1, Y = 0, Depth = 0 } },
+        Drones = { new DroneState { Id = 0, X = 1, Y = 0, Depth = 0, Hat = "Straw_Hat" } },
         Tiles =
         {
             new List<TileState>

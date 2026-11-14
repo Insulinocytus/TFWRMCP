@@ -337,6 +337,22 @@ def check_get_state_fields(mcp):
         "drones", "save", "unlocks", "world_size"]
     fails(mcp, "get_state", "world_size", fields=["inventory", "nope"])
 
+    assert all(d["hat"] == "Straw_Hat" for d in ok(mcp, "get_state", fields=["drones"])["drones"])
+    # Wear a hat the test Save does not own yet: grant the Unlock that gives it, then change_hat in a looping Run.
+    locked = ok(mcp, "list_builtins")["locked"]
+    hat, grant = next((h, g[0]) for h, g in locked.items() if h.endswith("_Hat") and g[0]["level"] == 1)
+    grant_unlocks(mcp, {grant["unlock"]})
+    run_wait(mcp, "smoke_hat", f"change_hat(Hats.{hat})\nwhile True:\n    do_a_flip()\n", timeout=1)
+    drones = ok(mcp, "get_state", fields=["drones"])["drones"]
+    ok(mcp, "stop_run")
+    assert drones[0]["hat"] == hat, (hat, drones)
+    print(f"    hat {hat} via {grant['unlock']}")
+
+    unlocks = ok(mcp, "get_state", fields=["unlocks"], unlocks=["loops", "speed"])["unlocks"]
+    assert sorted(u["name"] for u in unlocks) == ["loops", "speed"], unlocks
+    assert ok(mcp, "get_state", fields=["entity_counts"]).keys() == {"entity_counts"}
+    fails(mcp, "get_state", "'nope'", unlocks=["nope"])
+
 
 def check_until_inventory(mcp):
     props = {t["name"]: t for t in mcp.rpc("tools/list")["tools"]}["run_script"]["inputSchema"]["properties"]
@@ -391,6 +407,9 @@ def check_tile_fields(mcp):
     assert 0 <= young["grown"] < 1 and "harvestable" not in young, young
     mature = wait_tile(lambda t: t.get("harvestable"))
     assert mature["harvestable"] is True and "grown" not in mature, mature
+    state = ok(mcp, "get_state", fields=["tiles", "entity_counts"])
+    bushes = sum(t.get("entity") == "bush" for row in state["tiles"] for t in row)
+    assert bushes >= 1 and state["entity_counts"].get("bush") == bushes, (state["entity_counts"], bushes)
     ok(mcp, "stop_run")
 
 

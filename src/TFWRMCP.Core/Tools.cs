@@ -23,7 +23,7 @@ public static partial class Tools
     {
         ("save", StateParts.Save), ("inventory", StateParts.Inventory), ("unlocks", StateParts.Unlocks),
         ("world_size", StateParts.WorldSize), ("drones", StateParts.Drones), ("tiles", StateParts.Tiles),
-        ("run", StateParts.Run),
+        ("entity_counts", StateParts.EntityCounts), ("run", StateParts.Run),
     };
 
     static StateParts RequestedStateParts(JObject args)
@@ -41,6 +41,16 @@ public static partial class Tools
             parts |= field.Part;
         }
         return parts;
+    }
+
+    /// <summary>The Unlock names to keep, or null to keep every Unlock.</summary>
+    static HashSet<string>? RequestedUnlocks(JObject args, StateParts parts)
+    {
+        var names = OptionalStrings(args, "unlocks");
+        if (names == null) return null;
+        if (!parts.HasFlag(StateParts.Unlocks))
+            throw new ToolException("'unlocks' filters the unlocks field, but 'fields' does not include unlocks.");
+        return new HashSet<string>(names.Select(n => ((string)n!).Trim().ToLowerInvariant()));
     }
 
     static JObject Schema(params (string Name, string Type, string Description, bool Required)[] properties)
@@ -98,31 +108,46 @@ public static partial class Tools
             "get_state",
             "Returns a snapshot of the game as the player sees it: current Save name, inventory, every Unlock " +
             "with its level, the cost of the next level (null at max level) and its prerequisites (parent: Unlock to own first; " +
-            "also_requires: {name, level}; each omitted when there is none), world size, drone positions, " +
+            "also_requires: {name, level}; each omitted when there is none), world size, drones (position, depth and " +
+            "the hat worn, spelled as in Hats, e.g. Straw_Hat), " +
             "the latest Run (run: status idle, running, finished, error, stopped_by_tool, stopped_by_user or " +
             "parse_error, plus script, error, Leaderboard result and the run summary: " + RunSummaryDescription +
             " Use wait_run for its output), and the grid as tiles[y][x]: " +
             "the outer array index is y (south to north), the inner index is x (west to east), so tiles[0][0] is (0, 0) " +
             "and x grows east, y grows north. Each tile has the ground type, plus: the entity type unless the tile is " +
             "empty; depth unless it is 0; harvestable: true when the entity can be harvested (as can_harvest() says); " +
-            "water (0-1) unless it is 0; grown (0-1) for a growing entity that is not yet mature. " +
-            "The full snapshot is large; pass fields to get only what you need.",
-            WithSchema(
-                Schema(("fields", "array", "Top-level fields to return (default: all): save, inventory, unlocks, " +
-                    "world_size, drones, tiles, run. Fields not listed are not read from the game.", false)),
+            "water (0-1) unless it is 0; grown (0-1) for a growing entity that is not yet mature. entity_counts maps " +
+            "each entity type (as in tiles) to the number of tiles holding it; empty tiles are not counted. " +
+            "The full snapshot is large; pass fields to get only what you need, and unlocks to get only some Unlocks.",
+            WithSchema(WithSchema(
+                Schema(
+                    ("fields", "array", "Top-level fields to return (default: all): save, inventory, unlocks, " +
+                        "world_size, drones, tiles, entity_counts, run. Fields not listed are not read from the game.", false),
+                    ("unlocks", "array", "Return only these Unlocks in unlocks (names as in unlocks, e.g. [\"loops\", " +
+                        "\"speed\"]). Unknown names are an error; fields, if passed, must include unlocks.", false)),
                 "fields",
                 new JObject { ["items"] = new JObject { ["type"] = "string", ["enum"] = new JArray(StateFields.Select(f => f.Name)) } }),
+                "unlocks",
+                new JObject { ["items"] = new JObject { ["type"] = "string" } }),
             async (args, _) =>
             {
                 var parts = RequestedStateParts(args);
-                var state = await game.GetState(parts);
+                var unlockNames = RequestedUnlocks(args, parts);
+                var state = await game.GetState(parts.HasFlag(StateParts.EntityCounts) ? parts | StateParts.Tiles : parts);
+                var unknown = unlockNames?.FirstOrDefault(n => state.Unlocks.All(u => u.Name != n));
+                if (unknown != null)
+                    throw new ToolException($"No Unlock named '{unknown}'. Unlock names are listed in get_state.");
                 var result = new Dictionary<string, object?>();
                 if (parts.HasFlag(StateParts.Save)) result["save"] = state.Save;
                 if (parts.HasFlag(StateParts.Inventory)) result["inventory"] = state.Inventory;
-                if (parts.HasFlag(StateParts.Unlocks)) result["unlocks"] = state.Unlocks;
+                if (parts.HasFlag(StateParts.Unlocks))
+                    result["unlocks"] = unlockNames == null ? state.Unlocks : state.Unlocks.Where(u => unlockNames.Contains(u.Name)).ToList();
                 if (parts.HasFlag(StateParts.WorldSize)) result["world_size"] = state.WorldSize;
                 if (parts.HasFlag(StateParts.Drones)) result["drones"] = state.Drones;
                 if (parts.HasFlag(StateParts.Tiles)) result["tiles"] = state.Tiles;
+                if (parts.HasFlag(StateParts.EntityCounts))
+                    result["entity_counts"] = state.Tiles.SelectMany(row => row).Select(t => t.Entity).OfType<string>()
+                        .GroupBy(e => e).ToDictionary(g => g.Key, g => g.Count());
                 if (parts.HasFlag(StateParts.Run))
                     result["run"] = await runs.Snapshot(withOutput: false, parts.HasFlag(StateParts.Inventory) ? state.Inventory : null);
                 return result;

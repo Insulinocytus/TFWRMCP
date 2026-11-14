@@ -303,7 +303,11 @@ public sealed partial class GameAdapter : IGame
 
             if (parts.HasFlag(StateParts.Drones))
                 foreach (var drone in farm.drones.Where(d => d != null))
-                    state.Drones.Add(new DroneState { Id = drone.DroneId, X = drone.pos.x, Y = drone.pos.y, Depth = drone.depth });
+                    state.Drones.Add(new DroneState
+                    {
+                        Id = drone.DroneId, X = drone.pos.x, Y = drone.pos.y, Depth = drone.depth,
+                        Hat = CodeUtilities.ToUpperSnake(drone.hat.hatSO.hatName),
+                    });
 
             if (parts.HasFlag(StateParts.Tiles))
                 for (var y = 0; y < size.y; y++)

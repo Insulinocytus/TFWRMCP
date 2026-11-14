@@ -40,6 +40,9 @@ public sealed class DroneState
     public int X { get; set; }
     public int Y { get; set; }
     public int Depth { get; set; }
+
+    /// <summary>Spelled as in the Script's Hats (e.g. Straw_Hat).</summary>
+    public string Hat { get; set; } = "";
 }
 
 /// <summary>
@@ -69,7 +72,10 @@ public sealed class TileState
     public double? Grown { get; set; }
 }
 
-/// <summary>The top-level parts of get_state; <see cref="Run"/> comes from the Run tracker, not from the game.</summary>
+/// <summary>
+/// The top-level parts of get_state; <see cref="Run"/> comes from the Run tracker and <see cref="EntityCounts"/> is
+/// counted from the tiles, neither from the game.
+/// </summary>
 [Flags]
 public enum StateParts
 {
@@ -80,7 +86,8 @@ public enum StateParts
     Drones = 16,
     Tiles = 32,
     Run = 64,
-    All = 127,
+    EntityCounts = 128,
+    All = 255,
 }
 
 public sealed class GameState

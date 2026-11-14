@@ -34,6 +34,7 @@ public class GetStateTests
 
         var drone = Assert.Single(state["drones"]!);
         Assert.Equal((0, 1, 0, 0), ((int)drone["id"]!, (int)drone["x"]!, (int)drone["y"]!, (int)drone["depth"]!));
+        Assert.Equal("Straw_Hat", (string)drone["hat"]!);
 
         var tiles = state["tiles"]!;
         Assert.Equal(2, tiles.Count());
@@ -105,9 +106,81 @@ public class GetStateTests
 
         var (_, text) = await s.Call("get_state");
 
-        Assert.Equal(new[] { "save", "inventory", "unlocks", "world_size", "drones", "tiles", "run" },
+        Assert.Equal(new[] { "save", "inventory", "unlocks", "world_size", "drones", "tiles", "entity_counts", "run" },
             JObject.Parse(text).Properties().Select(p => p.Name));
         Assert.Equal(StateParts.All, game.LastParts);
+    }
+
+    [Fact]
+    public async Task Entity_counts_count_the_tiles_holding_each_entity_type()
+    {
+        var game = new FakeGame();
+        game.State.Tiles.Add(new List<TileState>
+        {
+            new TileState { Entity = "bush", Ground = "grassland" },
+            new TileState { Entity = "bush", Ground = "soil" },
+        });
+        using var s = new TestServer(game);
+
+        var (isError, text) = await s.Call("get_state", new JObject { ["fields"] = new JArray("entity_counts") });
+
+        Assert.False(isError, text);
+        var state = JObject.Parse(text);
+        Assert.Equal(new[] { "entity_counts" }, state.Properties().Select(p => p.Name));
+        Assert.True(JToken.DeepEquals(new JObject { ["grass"] = 1, ["tree"] = 1, ["bush"] = 2 }, state["entity_counts"]));
+    }
+
+    [Fact]
+    public async Task Entity_counts_are_empty_on_a_farm_without_entities()
+    {
+        var game = new FakeGame();
+        foreach (var tile in game.State.Tiles.SelectMany(row => row)) tile.Entity = null;
+        using var s = new TestServer(game);
+
+        var (_, text) = await s.Call("get_state", new JObject { ["fields"] = new JArray("entity_counts") });
+
+        Assert.Empty((JObject)JObject.Parse(text)["entity_counts"]!);
+    }
+
+    [Fact]
+    public async Task Unlocks_filter_returns_only_the_listed_unlocks()
+    {
+        var game = new FakeGame();
+        game.State.Unlocks.Add(new UnlockState { Name = "speed", MaxLevel = 5 });
+        using var s = new TestServer(game);
+
+        var (isError, text) = await s.Call("get_state",
+            new JObject { ["fields"] = new JArray("unlocks"), ["unlocks"] = new JArray(" Speed", "grass") });
+
+        Assert.False(isError, text);
+        var names = JObject.Parse(text)["unlocks"]!.Select(u => (string)u["name"]!);
+        Assert.Equal(new[] { "grass", "speed" }, names.OrderBy(n => n));
+    }
+
+    [Fact]
+    public async Task Unknown_unlock_names_are_an_error()
+    {
+        using var s = new TestServer(new FakeGame());
+
+        var (isError, text) = await s.Call("get_state", new JObject { ["unlocks"] = new JArray("grass", "bogus") });
+
+        Assert.True(isError);
+        Assert.Contains("'bogus'", text);
+    }
+
+    [Theory]
+    [InlineData("{\"fields\": [\"inventory\"], \"unlocks\": [\"grass\"]}")]
+    [InlineData("{\"unlocks\": \"grass\"}")]
+    [InlineData("{\"unlocks\": [3]}")]
+    public async Task Invalid_unlocks_filters_are_an_error_without_reading_the_game(string args)
+    {
+        var game = new FakeGame();
+        using var s = new TestServer(game);
+
+        var (isError, _) = await s.Call("get_state", JObject.Parse(args));
+
+        Assert.True(isError);
+        Assert.Equal(0, game.Calls);
     }
 
     [Theory]
