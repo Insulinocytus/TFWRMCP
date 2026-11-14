@@ -266,6 +266,7 @@ public class GetStateTests
         public Task StopRun() => throw new NotSupportedException();
         public event Action<RunEvent> RunEvents { add { } remove { } }
         public long RunTicks => 0;
+        public double GameSeconds => 0;
         public Task<UnlockAttempt> TryUnlock(string name, Func<UnlockFacts, string?> whyNot) => throw new NotSupportedException();
         public Task<UnlockTree> GetUnlockTree() => throw new NotSupportedException();
         public Task SetInputLock(string? tool) => Task.CompletedTask;

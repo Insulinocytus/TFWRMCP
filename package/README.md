@@ -56,7 +56,10 @@ right after the Run has started). The call blocks that long, so keep it below yo
 seconds in many clients) and call `wait_run` again to keep waiting. Pass `until_inventory` (for example
 `{"carrot": 600}`) to also end as soon as the inventory holds at least that much of every item; the result then has
 `inventory` and `met`. With `stop_when_met` the Run is stopped at that moment, so "run until carrot ≥ 600, then stop"
-is a single call.
+is a single call. `run_script` also takes `stop_after_seconds`: the Run is stopped once the game clock (the one
+`get_time()` reads) has advanced that far, even after the call has returned `running`; with `until_inventory` and
+`stop_when_met`, whichever comes first stops it. To measure production, call
+`run_script(stop_after_seconds=60, timeout_seconds=0)`, then `wait_run` until the Run has ended and read `rates`.
 
 `write_script` refuses to overwrite a Script that is being run. Pass `stop_current: true` to first stop the Run in
 progress (returned as `stopped`) and `run: true` to run the Script right after writing it (returned as `run`, taking
@@ -67,7 +70,8 @@ Every Run (from `run_script`, `wait_run`, `stop_run` and `get_state`'s `run`) ca
 without progress shows: `inventory_delta` (net change per item since the Run began, non-zero items only, covering
 everything: script actions, the game's own production and consumption, Unlocks bought), `failed_calls` (per function,
 how often `plant`, `harvest`, `move`, `swap`, `use_item`, `place`, `dig`, `push`, `unlock` or `hover` returned
-`False`; `harvest()` on an unripe entity counts too, `till()` is not counted), `ticks` (game steps) and `seconds`.
+`False`; `harvest()` on an unripe entity counts too, `till()` is not counted), `ticks` (game steps), `seconds`,
+`game_seconds` (on the game clock) and `rates` (`inventory_delta` per game second, absent when `game_seconds` is 0).
 Actions on the temporary farm of `simulate()` and leaderboard runs do not count.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before

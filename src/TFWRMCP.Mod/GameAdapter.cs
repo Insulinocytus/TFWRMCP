@@ -45,6 +45,18 @@ public sealed partial class GameAdapter : IGame
         }
     }
 
+    /// <summary>Read like <see cref="RunTicks"/>: Duration is one aligned 8-byte field, so at worst a step old.</summary>
+    public double GameSeconds
+    {
+        get
+        {
+            var main = MainSim.Inst;
+            if ((object)main == null || simField == null) return 0;
+            var sim = main.storedSim ?? (Simulation?)simField.GetValue(main);
+            return sim == null ? 0 : sim.CurrentTime.Seconds;
+        }
+    }
+
     public event Action<RunEvent> RunEvents = delegate { };
 
     /// <summary>

@@ -23,6 +23,9 @@ public sealed partial class FakeGame
     /// <summary>Steps the Run has executed so far; a stopped Run reports the value it has then.</summary>
     public long RunTicks { get; set; }
 
+    /// <summary>The real farm's game clock; tests advance it by hand.</summary>
+    public double GameSeconds { get; set; }
+
     public event Action<RunEvent>? RunEvents;
 
     public void Emit(RunEvent e)

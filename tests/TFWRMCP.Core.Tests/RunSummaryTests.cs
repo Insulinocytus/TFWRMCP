@@ -133,6 +133,46 @@ public class RunSummaryTests
     }
 
     [Fact]
+    public async Task Game_seconds_follow_the_game_clock_and_rates_divide_the_delta_by_them()
+    {
+        var game = GameWithScript();
+        game.GameSeconds = 100;
+        using var s = new TestServer(game);
+
+        await Ok(s, "run_script", Run(timeout: 0));
+        game.GameSeconds = 102.5;
+        game.State.Inventory["hay"] = 22.5;
+        var running = await Ok(s, "get_state", new JObject { ["fields"] = new JArray("run") });
+        game.GameSeconds = 104;
+        game.State.Inventory["wood"] = 2;
+        await Ok(s, "stop_run");
+        game.GameSeconds = 500;
+        var ended = await Ok(s, "wait_run");
+
+        Assert.Equal(2.5, (double)running["run"]!["game_seconds"]!);
+        Assert.Equal(new JObject { ["hay"] = 4.0 }, running["run"]!["rates"]);
+        Assert.Equal(4, (double)ended["game_seconds"]!);
+        Assert.Equal(new JObject { ["hay"] = 2.5, ["wood"] = 0.5 }, ended["rates"]);
+    }
+
+    [Fact]
+    public async Task A_Run_that_took_no_game_time_has_no_rates()
+    {
+        var game = GameWithScript();
+        game.OnStartRun = _ =>
+        {
+            game.State.Inventory["hay"] = 20;
+            game.Emit(new RunEnded(RunEnd.Terminated, Inventory(game), 1));
+        };
+        using var s = new TestServer(game);
+
+        var run = await Ok(s, "run_script", Run());
+
+        Assert.Equal(0, (double)run["game_seconds"]!);
+        Assert.Null(run["rates"]);
+    }
+
+    [Fact]
     public async Task A_Run_started_by_the_human_gets_a_summary_too()
     {
         var game = GameWithScript();
@@ -161,7 +201,7 @@ public class RunSummaryTests
         var reloaded = await Ok(s, "get_state", new JObject { ["fields"] = new JArray("run") });
 
         foreach (var run in new[] { idle["run"]!, parseError, reloaded["run"]! })
-            foreach (var field in new[] { "inventory_delta", "failed_calls", "ticks", "seconds" })
+            foreach (var field in new[] { "inventory_delta", "failed_calls", "ticks", "seconds", "game_seconds", "rates" })
                 Assert.Null(run[field]);
     }
 
@@ -177,7 +217,7 @@ public class RunSummaryTests
         var state = await Ok(s, "get_state", new JObject { ["fields"] = new JArray("run") });
 
         Assert.Equal("idle", (string)state["run"]!["status"]!);
-        foreach (var field in new[] { "inventory_delta", "failed_calls", "ticks", "seconds" })
+        foreach (var field in new[] { "inventory_delta", "failed_calls", "ticks", "seconds", "game_seconds", "rates" })
             Assert.Null(state["run"]![field]);
     }
 

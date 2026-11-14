@@ -28,10 +28,21 @@ public static partial class Tools
         "unlock or hover call that returned False counts once; harvest() on an entity that is not harvestable " +
         "also counts as a failed harvest, because the game then returns True, clears the crop and yields " +
         "nothing; till() has no return value and is not counted), ticks (game steps the Run has executed, the " +
-        "unit of get_tick_count()) and seconds (real elapsed time); ticks and seconds stop growing when the Run " +
-        "ends. Actions and items on the temporary farm of simulate() and Leaderboard Runs do not count; Runs " +
-        "started by the human do. parse_error results have none of these. Use them to notice a Script that " +
-        "spins without progress, e.g. plant() failing on occupied tiles while items are consumed.";
+        "unit of get_tick_count()), seconds (real elapsed time), game_seconds (elapsed time on the game clock " +
+        "that get_time() reads, of the real farm) and rates (item name to inventory_delta divided by " +
+        "game_seconds, the net change per game second; absent when game_seconds is 0 or inventory_delta is " +
+        "absent); ticks, seconds and game_seconds stop growing when the Run ends. Actions and items on the " +
+        "temporary farm of simulate() and Leaderboard Runs do not count; Runs started by the human do. " +
+        "parse_error results have none of these. Use them to notice a Script that spins without progress, " +
+        "e.g. plant() failing on occupied tiles while items are consumed.";
+
+    const string StopAfterSecondsDescription =
+        "Stop the Run (like stop_run) once the game clock (the one get_time() reads) has advanced this many " +
+        "seconds since it began; a number greater than 0. The deadline belongs to the Run, not to this call: " +
+        "when the call returns 'running' first, the Run is still stopped on time and wait_run returns it. It is " +
+        "dropped when the Run ends first. Combined with until_inventory and stop_when_met, whichever holds first " +
+        "stops the Run. To measure production: stop_after_seconds=60, timeout_seconds=0, then wait_run until the " +
+        "Run has ended and read rates.";
 
     const string UntilInventoryDescription =
         "Item name to amount, e.g. {\"carrot\": 600}: the inventory must hold at least that much of every listed " +
@@ -91,11 +102,21 @@ public static partial class Tools
         return TimeSpan.FromSeconds(Math.Min(seconds, MaxTimeoutSeconds));
     }
 
+    static double? StopAfterSeconds(JObject args)
+    {
+        var token = args["stop_after_seconds"];
+        if (token == null || token.Type == JTokenType.Null) return null;
+        if (token.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)token > 0))
+            throw new ToolException("'stop_after_seconds' must be a number greater than 0.");
+        return (double)token;
+    }
+
     static async Task<RunSnapshot> StartAndWait(IGame game, RunTracker runs, string name, TimeSpan timeout,
-        InventoryGoal? goal, CancellationToken cancel)
+        InventoryGoal? goal, CancellationToken cancel, double? stopAfterSeconds = null)
     {
         var syntaxError = await game.StartRun(name, cancel);
         if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
+        else if (stopAfterSeconds is { } seconds) runs.StopAfter(seconds);
         return await runs.Wait(timeout, cancel, goal);
     }
 
@@ -176,14 +197,18 @@ public static partial class Tools
             "starting a Run) and, when the Script ran leaderboard_run(), leaderboard (reached_goal, average_seconds, " +
             "rank or null without Steam). A runtime error stops the Run automatically. The Leaderboard result page " +
             "is closed automatically. To run until the inventory reaches a target, pass until_inventory (and " +
-            "stop_when_met to stop the Run then) instead of polling get_state. The Run also carries a summary: " +
+            "stop_when_met to stop the Run then) instead of polling get_state; to run for a fixed game time, pass " +
+            "stop_after_seconds. The Run also carries a summary: " +
             RunSummaryDescription,
-            WaitSchema(("name", "string", "Script name (case-sensitive).", true)),
+            WaitSchema(
+                ("name", "string", "Script name (case-sensitive).", true),
+                ("stop_after_seconds", "number", StopAfterSecondsDescription, false)),
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
+                var stopAfterSeconds = StopAfterSeconds(args);
                 var (timeout, goal) = await WaitArgs(args, game);
-                return await StartAndWait(game, runs, name, timeout, goal, cancel);
+                return await StartAndWait(game, runs, name, timeout, goal, cancel, stopAfterSeconds);
             },
             Capabilities.Run),
         new Tool(

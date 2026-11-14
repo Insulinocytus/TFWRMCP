@@ -103,6 +103,14 @@ public sealed class RunSnapshot
     /// <summary>Real time since the Run began; fixed once it has ended.</summary>
     [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
     public double? Seconds { get; set; }
+
+    /// <summary>Game clock seconds since the Run began (the real farm's, as get_time() reads it); fixed once it has ended.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public double? GameSeconds { get; set; }
+
+    /// <summary><see cref="InventoryDelta"/> per <see cref="GameSeconds"/>; absent when either is unknown or zero.</summary>
+    [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+    public Dictionary<string, double>? Rates { get; set; }
 }
 
 /// <summary>Wait until every item is at least its amount; with <see cref="StopWhenMet"/> the Run is stopped as soon as that holds.</summary>
@@ -143,6 +151,8 @@ public sealed class RunTracker
         // Null for Runs that never started: they have no summary.
         public Dictionary<string, double>? StartInventory;
         public Stopwatch? Clock;
+        public double StartGameSeconds;
+        public double EndGameSeconds;
         public readonly Dictionary<string, int> Failed = new();
         public Dictionary<string, double>? EndInventory;
         public long EndTicks;
@@ -195,6 +205,7 @@ public sealed class RunTracker
                 current = new Record
                 {
                     Status = RunStatus.Running, Script = started.Script, StartInventory = started.Inventory, Clock = Stopwatch.StartNew(),
+                    StartGameSeconds = game.GameSeconds,
                 };
                 return;
             }
@@ -229,6 +240,7 @@ public sealed class RunTracker
                         ended.How == RunEnd.Terminated ? RunStatus.Finished :
                         current.StopRequestedByTool ? RunStatus.StoppedByTool : RunStatus.StoppedByUser;
                     current.Clock!.Stop();
+                    current.EndGameSeconds = game.GameSeconds;
                     current.EndInventory = ended.Inventory;
                     current.EndTicks = ended.Ticks;
                     current.Over.TrySetResult(true);
@@ -300,6 +312,10 @@ public sealed class RunTracker
         snapshot.FailedCalls = new Dictionary<string, int>(r.Failed);
         snapshot.Ticks = running ? game.RunTicks : r.EndTicks;
         snapshot.Seconds = Math.Round(r.Clock.Elapsed.TotalSeconds, 3);
+        var gameSeconds = Math.Round((running ? game.GameSeconds : r.EndGameSeconds) - r.StartGameSeconds, 3);
+        snapshot.GameSeconds = gameSeconds;
+        if (snapshot.InventoryDelta != null && gameSeconds > 0)
+            snapshot.Rates = snapshot.InventoryDelta.ToDictionary(c => c.Key, c => c.Value / gameSeconds);
         return snapshot;
     }
 
@@ -308,6 +324,47 @@ public sealed class RunTracker
     bool IsRunning(Record run)
     {
         lock (gate) return run.Status == RunStatus.Running;
+    }
+
+    bool IsCurrentAndRunning(Record run)
+    {
+        lock (gate) return run == current && run.Status == RunStatus.Running;
+    }
+
+    static readonly TimeSpan MaxDeadlinePoll = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Stops the current Run on the Agent's behalf once the game clock is <paramref name="gameSeconds"/> past its start,
+    /// independently of any Tool call; dropped when the Run ends or is replaced first.
+    /// </summary>
+    public void StopAfter(double gameSeconds)
+    {
+        Record run;
+        lock (gate) run = current;
+        if (IsRunning(run)) _ = StopAtDeadline(run, run.StartGameSeconds + gameSeconds);
+    }
+
+    async Task StopAtDeadline(Record run, double deadline)
+    {
+        try
+        {
+            while (IsCurrentAndRunning(run))
+            {
+                var left = deadline - game.GameSeconds;
+                if (left <= 0)
+                {
+                    await StopByTool(run, Tools.StopTimeout, CancellationToken.None);
+                    return;
+                }
+                // The game clock runs at most as fast as real time on the real farm, so sleeping for what is left never overshoots.
+                var poll = TimeSpan.FromSeconds(Math.Max(left, 0.001));
+                await WaitOver(run, poll < MaxDeadlinePoll ? poll : MaxDeadlinePoll, CancellationToken.None);
+            }
+        }
+        catch (Exception e)
+        {
+            log($"Stopping the Run at its stop_after_seconds deadline failed: {e}");
+        }
     }
 
     async Task WaitOver(Record run, TimeSpan timeout, CancellationToken cancel)

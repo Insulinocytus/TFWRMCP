@@ -570,6 +570,15 @@ def check_run_summary(mcp):
     time.sleep(1)
     assert ok(mcp, "wait_run")["seconds"] == again["seconds"] and ok(mcp, "get_state", fields=["run"])["run"]["ticks"] == again["ticks"]
 
+    # stop_after_seconds stops the Run on the game clock after the call has returned; rates divide the delta by it.
+    ok(mcp, "write_script", name="smoke_timed", code="while True:\n    if can_harvest():\n        harvest()\n")
+    assert ok(mcp, "run_script", name="smoke_timed", stop_after_seconds=3, timeout_seconds=0)["status"] == "running"
+    run = ok(mcp, "wait_run", timeout_seconds=20)
+    assert run["status"] == "stopped_by_tool" and 3 <= run["game_seconds"] < 3.5, run
+    assert all(abs(run["rates"][k] - v / run["game_seconds"]) < 1e-9 for k, v in run["inventory_delta"].items()), run
+    fails(mcp, "run_script", "stop_after_seconds", name="smoke_timed", stop_after_seconds=0)
+    print(f"    game_seconds {run['game_seconds']}, rates {run['rates']}")
+
 
 def check_get_state_during_simulate(mcp):
     # The real farm differs from simulate()'s temporary one (1x1, drone at (0,0)): a bush under the drone, the test

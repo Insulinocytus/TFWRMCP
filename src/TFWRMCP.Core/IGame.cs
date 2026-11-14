@@ -109,6 +109,12 @@ public interface IGame
     long RunTicks { get; }
 
     /// <summary>
+    /// The real farm's game clock in seconds, as a Script's get_time() reads it; during simulate() and Leaderboard Runs
+    /// it is the stored real farm's clock, not the temporary farm's. Never blocks.
+    /// </summary>
+    double GameSeconds { get; }
+
+    /// <summary>
     /// Looks the Unlock up as the research menu does and, in the same game tick, buys or upgrades it (including its
     /// hat) when <paramref name="whyNot"/> returns null for its facts. Facts are null when no such Unlock is listed.
     /// </summary>
