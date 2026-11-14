@@ -169,6 +169,7 @@ public static class SimulatedRun
             }
             if (run.Ended == null) return;
 
+            log("The simulated Run is over but the game has not restored the real farm (Leaderboard overlay inactive?); restoring it.");
             var real = __instance.storedSim;
             lock (lockField!.GetValue(__instance))
             {

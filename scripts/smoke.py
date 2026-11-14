@@ -607,7 +607,7 @@ def check_get_state_during_simulate(mcp):
     finally:
         ok(mcp, "stop_run")
     for key in before:
-        assert during[key] == before[key], f"get_state {key} during simulate() is not the real farm's"
+        assert during[key] == before[key], f"get_state {key} during simulate() is not the real farm's: {before[key]} vs {during[key]}"
 
 
 def check_simulate_script(mcp):
@@ -685,7 +685,7 @@ def check_simulate_script(mcp):
     ok(mcp, "write_script", name="smoke_sim_error", code="print('before')\nno_such_function()\n")
     run = ok(mcp, "simulate_script", name="smoke_sim_error", game_seconds=5, timeout_seconds=30)
     assert run["status"] == "error" and run["simulated"] is True and run["error"]["line"] == 2, run
-    assert run["output"] == ["before"], run
+    assert run["output"][0] == "before" and len(run["output"]) == 2, run  # the game's error message follows
     assert ok(mcp, "run_script", name="smoke_run", timeout_seconds=30)["status"] == "finished"
     assert "simulated" not in ok(mcp, "wait_run")
 
