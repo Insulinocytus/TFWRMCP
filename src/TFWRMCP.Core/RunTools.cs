@@ -102,10 +102,13 @@ public static partial class Tools
         return TimeSpan.FromSeconds(Math.Min(seconds, MaxTimeoutSeconds));
     }
 
-    static double? StopAfterSeconds(JObject args)
+    static double? StopAfterSeconds(JObject args, IGame game)
     {
         var token = args["stop_after_seconds"];
         if (token == null || token.Type == JTokenType.Null) return null;
+        if (game.UnavailableReason(Capabilities.State) is { } reason)
+            throw new ToolException($"'stop_after_seconds' is unavailable: capability '{Capabilities.State}' failed to " +
+                $"resolve ({reason}).");
         if (token.Type is not (JTokenType.Integer or JTokenType.Float) || !((double)token > 0))
             throw new ToolException("'stop_after_seconds' must be a number greater than 0.");
         return (double)token;
@@ -116,7 +119,7 @@ public static partial class Tools
     {
         var syntaxError = await game.StartRun(name, cancel);
         if (syntaxError != null) runs.RecordSyntaxError(name, syntaxError);
-        else if (stopAfterSeconds is { } seconds) runs.StopAfter(seconds);
+        else if (stopAfterSeconds is { } seconds) runs.StopAfterGameSeconds(seconds);
         return await runs.Wait(timeout, cancel, goal);
     }
 
@@ -206,7 +209,7 @@ public static partial class Tools
             async (args, cancel) =>
             {
                 var name = RequiredString(args, "name");
-                var stopAfterSeconds = StopAfterSeconds(args);
+                var stopAfterSeconds = StopAfterSeconds(args, game);
                 var (timeout, goal) = await WaitArgs(args, game);
                 return await StartAndWait(game, runs, name, timeout, goal, cancel, stopAfterSeconds);
             },

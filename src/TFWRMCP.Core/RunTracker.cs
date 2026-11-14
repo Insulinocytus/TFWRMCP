@@ -337,7 +337,7 @@ public sealed class RunTracker
     /// Stops the current Run on the Agent's behalf once the game clock is <paramref name="gameSeconds"/> past its start,
     /// independently of any Tool call; dropped when the Run ends or is replaced first.
     /// </summary>
-    public void StopAfter(double gameSeconds)
+    public void StopAfterGameSeconds(double gameSeconds)
     {
         Record run;
         lock (gate) run = current;

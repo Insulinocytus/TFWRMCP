@@ -71,7 +71,8 @@ without progress shows: `inventory_delta` (net change per item since the Run beg
 everything: script actions, the game's own production and consumption, Unlocks bought), `failed_calls` (per function,
 how often `plant`, `harvest`, `move`, `swap`, `use_item`, `place`, `dig`, `push`, `unlock` or `hover` returned
 `False`; `harvest()` on an unripe entity counts too, `till()` is not counted), `ticks` (game steps), `seconds`,
-`game_seconds` (on the game clock) and `rates` (`inventory_delta` per game second, absent when `game_seconds` is 0).
+`game_seconds` (on the game clock) and `rates` (`inventory_delta` per game second, absent when `game_seconds` is 0 or
+`inventory_delta` is absent).
 Actions on the temporary farm of `simulate()` and leaderboard runs do not count.
 
 `list_saves`, `create_save`, `load_save` and `save_game` manage Saves. The title menu is closed automatically before
