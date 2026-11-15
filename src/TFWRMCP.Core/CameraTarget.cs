@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace TFWRMCP;
 
-/// <summary>Where the camera should be: the container point at the screen center, and the zoom.</summary>
+/// <summary>Where the camera should be: the container point at the center of the room it is fit into, and the zoom.</summary>
 public readonly struct CameraView
 {
     public CameraView(float x, float y, float zoom)
@@ -22,12 +22,11 @@ public readonly struct CameraView
 public static class CameraTarget
 {
     /// <summary>
-    /// Centers the farm and zooms so that the range around its center that reaches the farthest edge of the farm or of any
-    /// window, mirrored on both sides, fills the viewport minus the resource bar's <paramref name="barHeight"/> at the bottom
-    /// and, the range being centered on screen, the same room at the top.
-    /// All lengths are container units at zoom 1, with <paramref name="viewportWidth"/> and <paramref name="viewportHeight"/> the screen's.
+    /// Centers the farm in the room and zooms so that the range around its center that reaches the farthest edge of the farm
+    /// or of any window, mirrored on both sides, fills the room.
+    /// All lengths are container units at zoom 1, the room's included.
     /// </summary>
-    public static CameraView Fit(Box farm, IEnumerable<Box> windows, float viewportWidth, float viewportHeight, float barHeight, float minZoom, float maxZoom)
+    public static CameraView Fit(Box farm, IEnumerable<Box> windows, float roomWidth, float roomHeight, float minZoom, float maxZoom)
     {
         var x = (farm.Left + farm.Right) / 2;
         var y = (farm.Top + farm.Bottom) / 2;
@@ -39,7 +38,7 @@ public static class CameraTarget
             halfHeight = Math.Max(halfHeight, Math.Max(y - window.Bottom, window.Top - y));
         }
 
-        var zoom = Math.Min(Room(viewportWidth, halfWidth), Room(viewportHeight - 2 * barHeight, halfHeight));
+        var zoom = Math.Min(Room(roomWidth, halfWidth), Room(roomHeight, halfHeight));
         return new CameraView(x, y, Math.Min(maxZoom, Math.Max(minZoom, zoom)));
     }
 

@@ -20,6 +20,15 @@ public sealed class ResourceBarPlacement : MonoBehaviour
 
     public void Install(Plugin owner) => plugin = owner;
 
+    /// <summary>The room the bar takes at the bottom of the screen, in pixels; nothing while it is elsewhere or hidden.</summary>
+    public static float Height(Plugin plugin)
+    {
+        var main = MainSim.Inst;
+        if (!plugin.ResourceBarAtBottom.Value || main == null || main.inv == null || !main.inv.gameObject.activeInHierarchy) return 0;
+        var bar = (RectTransform)main.inv.transform;
+        return bar.rect.height * bar.lossyScale.y;
+    }
+
     // Late: the game's own layout of the bar has run by now.
     void LateUpdate()
     {

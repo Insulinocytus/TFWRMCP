@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace TFWRMCP;
 
-/// <summary>A rectangle in the game's UI container units, y growing upwards.</summary>
+/// <summary>A rectangle, y growing upwards.</summary>
 public readonly struct Box
 {
     public Box(float left, float top, float right, float bottom)
@@ -24,22 +24,20 @@ public readonly struct Box
 /// <summary>What gets arranged: a code window or a dock group (see <see cref="Layout.Group"/>).</summary>
 public readonly struct Unit
 {
-    public Unit(string name, float width, float height, bool running, bool focused)
+    public Unit(string name, float width, float height, bool running)
     {
         Name = name;
         Width = width;
         Height = height;
         Running = running;
-        Focused = focused;
     }
 
     public string Name { get; }
     public float Width { get; }
     public float Height { get; }
-    public bool Running { get; }
-    public bool Focused { get; }
 
-    public bool Expanded => Layout.IsExpanded(Running, Focused);
+    /// <summary>The window takes part in a Run; such units go to the left column.</summary>
+    public bool Running { get; }
 }
 
 /// <summary>Where a <see cref="Unit"/>'s top-left corner goes.</summary>
@@ -57,39 +55,52 @@ public readonly struct Placement
     public float Top { get; }
 }
 
-/// <summary>Decides where code windows go around the farm; pure data in, pure data out.</summary>
+/// <summary>Decides where code windows go on the screen; pure data in, pure data out.</summary>
 public static class Layout
 {
     public const float Gap = 20;
-
-    /// <summary>Windows that take part in a Run or have input focus are shown open; the rest are folded away.</summary>
-    public static bool IsExpanded(bool running, bool focused) => running || focused;
+    public const float Spacing = 5;
 
     /// <summary>
     /// Docked windows, top one first, as one unit: named by the top window (which is what it sorts by and what moves), as wide
-    /// as the widest member and as tall as all of them together, open when any member is.
+    /// as the widest member and as tall as all of them together, running when any member is.
     /// </summary>
     public static Unit Group(IReadOnlyList<Unit> topFirst) => new(
-        topFirst[0].Name, topFirst.Max(u => u.Width), topFirst.Sum(u => u.Height), topFirst.Any(u => u.Running), topFirst.Any(u => u.Focused));
+        topFirst[0].Name, topFirst.Max(u => u.Width), topFirst.Sum(u => u.Height), topFirst.Any(u => u.Running));
 
     /// <summary>
-    /// Expanded units stack in a left column and the others in a right column, each sorted by name, tops on the farm's top,
-    /// a <see cref="Gap"/> between columns and farm and between units. The columns may run past the farm's bottom.
+    /// Running units stack in a column <see cref="Gap"/> from the screen's left edge and the others in one <see cref="Gap"/>
+    /// from its right edge, each sorted by name with <see cref="Spacing"/> between units and centered vertically on the
+    /// screen; a column taller than the screen starts <see cref="Gap"/> below its top and runs past its bottom.
     /// </summary>
-    public static List<Placement> Arrange(Box farm, IEnumerable<Unit> units)
+    public static List<Placement> Arrange(Box screen, IEnumerable<Unit> units)
     {
         var placed = new List<Placement>();
-        foreach (var column in units.GroupBy(u => u.Expanded))
+        foreach (var column in units.GroupBy(u => u.Running))
         {
-            var top = farm.Top;
+            var height = column.Sum(u => u.Height) + Spacing * (column.Count() - 1);
+            var top = height > screen.Top - screen.Bottom - 2 * Gap ? screen.Top - Gap : (screen.Top + screen.Bottom + height) / 2;
             foreach (var unit in column.OrderBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
             {
-                placed.Add(new Placement(unit.Name, column.Key ? farm.Left - Gap - unit.Width : farm.Right + Gap, top));
-                top -= unit.Height + Gap;
+                placed.Add(new Placement(unit.Name, column.Key ? screen.Left + Gap : screen.Right - Gap - unit.Width, top));
+                top -= unit.Height + Spacing;
             }
         }
 
         return placed;
+    }
+
+    /// <summary>The part of the screen between the columns <see cref="Arrange"/> makes, a <see cref="Gap"/> clear of each.</summary>
+    public static Box Between(Box screen, IEnumerable<Unit> units)
+    {
+        float left = screen.Left, right = screen.Right;
+        foreach (var unit in units)
+        {
+            if (unit.Running) left = Math.Max(left, screen.Left + unit.Width + 2 * Gap);
+            else right = Math.Min(right, screen.Right - unit.Width - 2 * Gap);
+        }
+
+        return new Box(left, screen.Top, right, screen.Bottom);
     }
 }
 

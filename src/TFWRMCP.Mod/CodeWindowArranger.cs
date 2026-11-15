@@ -7,62 +7,70 @@ using UnityEngine;
 namespace TFWRMCP.Mod;
 
 /// <summary>
-/// Keeps the code windows around the farm (see <see cref="Layout"/>): running or focused windows open, the rest fold, and
-/// all glide to their places. Windows docked together are one unit, moved by their top window; a group holding a
-/// documentation window is left alone. Windows are tracked as offsets from the farm's top-left corner, so the game
-/// recentering its workspace container does not matter.
+/// Pins the code windows to the screen in two columns (see <see cref="Layout"/>): every window is folded, those taking part
+/// in a Run go middle left, the rest middle right, and all glide to their places. Windows docked together are one unit,
+/// moved by their top window; a group holding a documentation window is left alone. The windows stay in the game's
+/// zooming workspace container and are scaled against its zoom every frame (docs/adr/0003), so their size on screen is
+/// that at zoom 1 and the game's own window handling and Saves keep working.
 /// </summary>
+[DefaultExecutionOrder(1000)]
 public sealed class CodeWindowArranger : MonoBehaviour
 {
     const double Duration = 0.5;
-    const double TypingPause = 0.5;
     // CodeWindow recomputes its automatic size two frames after it is folded or unfolded.
     const int SettleFrames = 3;
 
-    sealed class Move
+    // Top-left corners in screen units (pixels over the canvas scale), y up.
+    sealed class Pin
     {
         public Vector2 From;
         public Vector2 To;
         public double Start;
     }
 
-    readonly Dictionary<Window, Move> moves = new();
-    readonly Dictionary<CodeWindow, (bool Running, bool Focused)> decided = new();
+    readonly Dictionary<Window, Pin> pins = new();
+    readonly Dictionary<Window, Vector3> baseScales = new();
     readonly List<List<CodeWindow>> groups = new();
-    readonly Dictionary<CodeWindow, int> lineCounts = new();
     readonly HashSet<CodeWindow> running = new();
-    readonly List<Window> finished = new();
+    readonly List<Window> gone = new();
     readonly List<Unit> units = new();
     readonly List<Unit> members = new();
     readonly Dictionary<string, Window> byName = new();
     static CodeWindowArranger? instance;
     Plugin plugin = null!;
     Workspace? workspace;
-    bool wasOn, pending, planDue, broken, rearrange;
+    bool wasOn, pending, broken, rearrange, docksChanged;
     int settle;
-    double typedAt = -1;
-    Vector2Int? farmSize;
+    (int Width, int Height, float Scale, float Bar) view;
+    Box? room;
+
+    /// <summary>The screen between the two columns in pixels, y up, while windows are arranged.</summary>
+    public static Box? Room => instance == null ? null : instance.room;
+
+    /// <summary>Whether the window is pinned to the screen, alone or docked under a pinned window.</summary>
+    public static bool IsPinned(Window window) => instance != null && window != null && instance.pins.ContainsKey(window.HighestDockedParent);
 
     public void Install(Plugin owner)
     {
         plugin = owner;
         instance = this;
-        FarmBounds.Install();
-        Patching.Patch(typeof(CodeWindowArranger), AccessTools.Method(typeof(CodeWindow), nameof(CodeWindow.UpdateTokens)),
-            "CodeWindow.UpdateTokens", postfix: nameof(TextChanged));
         Patching.Patch(typeof(CodeWindowArranger), AccessTools.Method(typeof(Workspace), nameof(Workspace.OpenCodeWindow)),
             "Workspace.OpenCodeWindow", postfix: nameof(ScriptsChanged));
         Patching.Patch(typeof(CodeWindowArranger), AccessTools.DeclaredMethod(typeof(Workspace), nameof(Workspace.RemoveWindow)),
             "Workspace.RemoveWindow", postfix: nameof(ScriptsChanged));
         Patching.Patch(typeof(CodeWindowArranger), AccessTools.DeclaredMethod(typeof(Workspace), nameof(Workspace.RenameWindow)),
             "Workspace.RenameWindow", postfix: nameof(ScriptsChanged));
+        Patching.Patch(typeof(CodeWindowArranger), AccessTools.Method(typeof(Window), nameof(Window.OnDrag)),
+            "Window.OnDrag", postfix: nameof(Dragged));
+        Patching.Patch(typeof(CodeWindowArranger), AccessTools.Method(typeof(Window), nameof(Window.Undock)),
+            "Window.Undock", prefix: nameof(Undocking));
+        Patching.Patch(typeof(CodeWindowArranger), AccessTools.Method(typeof(Window), nameof(Window.DockOnto)),
+            "Window.DockOnto", postfix: nameof(Docked));
+        Patching.Patch(typeof(CodeWindowArranger), AccessTools.Method(typeof(Window), nameof(Window.OnEndDrag)),
+            "Window.OnEndDrag", postfix: nameof(Dropped));
+        Patching.Patch(typeof(CodeWindowArranger), AccessTools.Method(typeof(Workspace), nameof(Workspace.MoveCameraTo)),
+            "Workspace.MoveCameraTo", prefix: nameof(CameraJump));
     }
-
-    // CodeWindow.UpdateTokens(), postfix: true when the text changed, possibly on the simulation thread (an import parsing).
-    static void TextChanged(CodeWindow __instance, bool __result) => Patching.Safely(nameof(TextChanged), () =>
-    {
-        if (__result) MainThread.Post(() => instance?.CountLines(__instance));
-    });
 
     // Workspace.OpenCodeWindow, RemoveWindow and RenameWindow, postfix: whoever creates, deletes or renames a Script, a Tool included.
     static void ScriptsChanged() => Patching.Safely(nameof(ScriptsChanged), () =>
@@ -70,25 +78,48 @@ public sealed class CodeWindowArranger : MonoBehaviour
         if (instance != null) instance.rearrange = true;
     });
 
-    // A changed line count starts the pause and any edit while it runs restarts it; edits within a line and focus changes alone do nothing.
-    void CountLines(CodeWindow code)
+    // Window.OnDrag, postfix: the player moved a pinned window; it stays where it was dropped until the next arrangement.
+    static void Dragged(Window __instance) => Patching.Safely(nameof(Dragged), () =>
     {
-        if (code == null || code.CodeInput == null) return;
-        var lines = 1;
-        foreach (var c in code.CodeInput.text)
-            if (c == '\n') lines++;
-        var changed = lineCounts.TryGetValue(code, out var before) && before != lines;
-        if (changed || typedAt >= 0) typedAt = Time.unscaledTimeAsDouble;
-        lineCounts[code] = lines;
+        if (instance == null || !instance.pins.TryGetValue(__instance, out var pin)) return;
+        pin.From = pin.To = instance.TopLeft(__instance);
+        pin.Start = 0;
+    });
+
+    // Window.Undock, prefix, and DockOnto, postfix: the groups change, which counts once the window is dropped.
+    static void Undocking(Window __instance) => Patching.Safely(nameof(Undocking), () =>
+    {
+        if (instance != null && __instance.dockedParent != null) instance.docksChanged = true;
+    });
+
+    static void Docked(Window __instance) => Patching.Safely(nameof(Docked), () =>
+    {
+        if (instance != null && __instance.dockedParent != null) instance.docksChanged = true;
+    });
+
+    // Window.OnEndDrag, postfix.
+    static void Dropped() => Patching.Safely(nameof(Dropped), () =>
+    {
+        if (instance != null && instance.docksChanged) instance.rearrange = true;
+    });
+
+    // Workspace.MoveCameraTo, prefix: the jump to a window for an error or a search makes no sense for a window pinned on screen.
+    static bool CameraJump(Window target)
+    {
+        var jump = true;
+        Patching.Safely(nameof(CameraJump), () => jump = !IsPinned(target));
+        return jump;
     }
 
-    void Update()
+    // Late, after the camera and the workspace's scrolling have moved the container this frame.
+    void LateUpdate()
     {
         if (broken) return;
         try { Tick(); }
         catch (Exception e)
         {
             broken = true;
+            Unpin();
             Patching.Warn($"Code window auto-arrange is off: {e.Message}");
         }
     }
@@ -99,20 +130,22 @@ public sealed class CodeWindowArranger : MonoBehaviour
         var space = main == null ? null : main.workspace;
         if (space == null || !plugin.AutoArrangeWindows.Value)
         {
-            moves.Clear();
-            wasOn = pending = planDue = rearrange = false;
-            typedAt = -1;
+            Unpin();
+            wasOn = pending = rearrange = false;
             return;
         }
 
         if (space != workspace)
         {
             workspace = space;
-            moves.Clear();
+            pins.Clear();
+            baseScales.Clear();
             running.Clear();
-            farmSize = null;
-            typedAt = -1;
+            room = null;
             wasOn = false;
+            var canvas = space.container.GetComponentInParent<Canvas>();
+            if (canvas == null || canvas.rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                throw new InvalidOperationException("the workspace is not on a screen space overlay canvas");
         }
 
         if (!space.gameObject.activeInHierarchy) return;
@@ -122,42 +155,29 @@ public sealed class CodeWindowArranger : MonoBehaviour
             pending = true;
         }
 
-        var changed = RunningChanged(space);
-        changed |= FarmResized();
-        changed |= TypingStopped();
-        if (changed || rearrange) pending = true;
+        var scale = Scale(space);
+        var now = (Screen.width, Screen.height, scale, ResourceBarPlacement.Height(plugin));
+        var resized = now != view;
+        view = now;
+
+        if (RunningChanged(space) || rearrange) pending = true;
         rearrange = false;
         if (pending)
         {
             Decide(space);
-            pending = planDue = false;
+            pending = false;
             settle = SettleFrames;
         }
-        else if (settle > 0 && --settle == 0)
+        else if ((settle > 0 && --settle == 0) || resized)
         {
-            planDue = true;
+            Plan(scale);
         }
 
-        if (planDue && Plan(space)) planDue = false;
-        Glide(space);
+        Hold(scale);
     }
 
-    // The size of the farm being shown, so expanding, set_world_size(), a Run restoring it and simulate() are all seen.
-    bool FarmResized()
-    {
-        var size = FarmBounds.Size();
-        if (size == null) return false;
-        var changed = farmSize != null && farmSize != size;
-        farmSize = size;
-        return changed;
-    }
-
-    bool TypingStopped()
-    {
-        if (typedAt < 0 || Time.unscaledTimeAsDouble - typedAt < TypingPause) return false;
-        typedAt = -1;
-        return true;
-    }
+    // Pixels per screen unit: the canvas scale, which the zoom container sits right under.
+    static float Scale(Workspace space) => space.zoomContainer.parent.lossyScale.x;
 
     bool RunningChanged(Workspace space)
     {
@@ -177,32 +197,28 @@ public sealed class CodeWindowArranger : MonoBehaviour
         return true;
     }
 
-    // Unfolds the windows that should be open and folds the rest; their sizes settle over the next frames.
+    // Folds every window that is arranged; their sizes settle over the next frames.
     void Decide(Workspace space)
     {
-        foreach (var gone in lineCounts.Keys.Where(code => code == null).ToList()) lineCounts.Remove(gone);
-        decided.Clear();
         groups.Clear();
+        docksChanged = false;
+        foreach (var pair in space.codeWindows)
+        {
+            var window = pair.Value.GetComponent<Window>();
+            if (!baseScales.ContainsKey(window)) baseScales[window] = window.transform.localScale;
+        }
+
         foreach (var pair in space.codeWindows)
         {
             var group = DockGroup(pair.Value.GetComponent<Window>());
             if (group == null) continue;
             groups.Add(group);
-            foreach (var code in group)
+            for (var i = 0; i < group.Count; i++)
             {
-                var window = code.GetComponent<Window>();
-                var state = (Running: code.isExecuting, Focused: code.CodeInput != null && code.CodeInput.isFocused);
-                decided[code] = state;
-                if (Layout.IsExpanded(state.Running, state.Focused))
-                {
-                    if (window.isMinimized) window.SetMinmized(false);
-                    window.playerSetSize = Vector2.zero;
-                    window.UpdateSize();
-                }
-                else if (!window.isMinimized)
-                {
-                    window.SetMinmized(true);
-                }
+                var window = group[i].GetComponent<Window>();
+                // A window undocked from a pinned one kept the scale against the zoom; under a dock it needs its own again.
+                if (i > 0) window.transform.localScale = baseScales[window];
+                if (!window.isMinimized) window.SetMinmized(true);
             }
         }
     }
@@ -221,32 +237,39 @@ public sealed class CodeWindowArranger : MonoBehaviour
         return group;
     }
 
-    bool Plan(Workspace space)
+    void Plan(float scale)
     {
-        if (!FarmBounds.TryGet(space, out var farm)) return false;
         units.Clear();
         byName.Clear();
         foreach (var group in groups)
         {
-            if (!TryUnit(space, group, out var unit)) continue;
+            if (!TryUnit(group, out var unit)) continue;
             units.Add(unit);
             byName[unit.Name] = group[0].GetComponent<Window>();
         }
 
-        var origin = new Vector2(farm.Left, farm.Top);
+        var bounds = new Box(0, view.Height / scale, view.Width / scale, view.Bar / scale);
         var now = Time.unscaledTimeAsDouble;
-        moves.Clear();
-        foreach (var place in Layout.Arrange(farm, units))
+        foreach (var pair in pins)
+            if (pair.Key == null || !byName.ContainsValue(pair.Key)) gone.Add(pair.Key!);
+        foreach (var window in gone) Unpin(window);
+        gone.Clear();
+
+        foreach (var place in Layout.Arrange(bounds, units))
         {
             var window = byName[place.Name];
-            moves[window] = new Move { From = Corner(space, window, false) - origin, To = new Vector2(place.Left, place.Top) - origin, Start = now };
+            if (!pins.TryGetValue(window, out var pin)) pins[window] = pin = new Pin { To = TopLeft(window) };
+            pin.From = At(pin, now);
+            pin.To = new Vector2(place.Left, place.Top);
+            pin.Start = now;
         }
 
-        return true;
+        var between = Layout.Between(bounds, units);
+        room = new Box(between.Left * scale, between.Top * scale, between.Right * scale, between.Bottom * scale);
     }
 
     // A group is gone from the plan when one of its windows was closed since it was decided.
-    bool TryUnit(Workspace space, List<CodeWindow> group, out Unit unit)
+    bool TryUnit(List<CodeWindow> group, out Unit unit)
     {
         unit = default;
         members.Clear();
@@ -254,52 +277,57 @@ public sealed class CodeWindowArranger : MonoBehaviour
         {
             if (code == null) return false;
             var window = code.GetComponent<Window>();
-            var topLeft = Corner(space, window, false);
-            var bottomRight = Corner(space, window, true);
-            var state = decided[code];
-            members.Add(new Unit(window.windowName, bottomRight.x - topLeft.x, topLeft.y - bottomRight.y, state.Running, state.Focused));
+            var size = window.WindowRect.rect.size;
+            var baseScale = baseScales[window];
+            members.Add(new Unit(window.windowName, size.x * baseScale.x, size.y * baseScale.y, code.isExecuting));
         }
 
         unit = Layout.Group(members);
         return true;
     }
 
-    void Glide(Workspace space)
+    static Vector2 At(Pin pin, double now) => new(
+        Tween.EaseOutExpo(pin.From.x, pin.To.x, pin.Start, Duration, now),
+        Tween.EaseOutExpo(pin.From.y, pin.To.y, pin.Start, Duration, now));
+
+    // Every frame: undo the zoom on each pinned window's scale and put its top-left corner where it belongs on screen.
+    void Hold(float scale)
     {
-        if (moves.Count == 0 || !FarmBounds.TryGet(space, out var farm)) return;
-        var origin = new Vector2(farm.Left, farm.Top);
         var now = Time.unscaledTimeAsDouble;
-        foreach (var pair in moves)
+        foreach (var pair in pins)
         {
             var window = pair.Key;
-            if (window == null)
-            {
-                finished.Add(window!);
-                continue;
-            }
-
-            var move = pair.Value;
-            var at = origin + new Vector2(
-                Tween.EaseOutExpo(move.From.x, move.To.x, move.Start, Duration, now),
-                Tween.EaseOutExpo(move.From.y, move.To.y, move.Start, Duration, now));
-            window.WindowRect.anchoredPosition += at - Corner(space, window, false);
-            if (now >= move.Start + Duration) finished.Add(window);
+            if (window == null || window.dockedParent != null) continue;
+            var transform = window.transform;
+            transform.localScale = baseScales[window] * (scale / transform.parent.lossyScale.x);
+            var to = At(pair.Value, now) * scale;
+            window.WindowRect.position += (Vector3)(to - TopLeftPixel(window));
         }
-
-        foreach (var window in finished)
-        {
-            moves.Remove(window);
-            if (window != null) space.OnWindowRectChanged(window);
-        }
-
-        finished.Clear();
     }
 
-    // A window corner in the workspace container's coordinates: the top-left, or the bottom-right.
-    static Vector2 Corner(Workspace space, Window window, bool bottomRight)
+    void Unpin()
+    {
+        foreach (var window in pins.Keys.ToList()) Unpin(window);
+        room = null;
+    }
+
+    // Back to the game's scale, the top-left corner kept where it is on screen, or in its dock slot.
+    void Unpin(Window window)
+    {
+        pins.Remove(window);
+        if (window == null) return;
+        var at = TopLeftPixel(window);
+        window.transform.localScale = baseScales[window];
+        if (window.dockedParent != null) window.WindowRect.anchoredPosition = Vector2.zero;
+        else window.WindowRect.position += (Vector3)(at - TopLeftPixel(window));
+    }
+
+    Vector2 TopLeft(Window window) => TopLeftPixel(window) / Scale(workspace!);
+
+    // On a screen space overlay canvas world coordinates are pixels.
+    static Vector2 TopLeftPixel(Window window)
     {
         var rect = window.WindowRect;
-        var local = bottomRight ? new Vector3(rect.rect.xMax, rect.rect.yMin) : new Vector3(rect.rect.xMin, rect.rect.yMax);
-        return space.container.InverseTransformPoint(rect.TransformPoint(local));
+        return rect.TransformPoint(new Vector3(rect.rect.xMin, rect.rect.yMax));
     }
 }

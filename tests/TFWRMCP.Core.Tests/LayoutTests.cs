@@ -5,42 +5,34 @@ namespace TFWRMCP.Core.Tests;
 
 public class LayoutTests
 {
-    // y grows upwards, like the game's UI: Top is the larger y.
-    static readonly Box Farm = new(left: 1000, top: 500, right: 1600, bottom: -100);
+    // y grows upwards, like the game's UI: Top is the larger y. A 100 high resource bar is off the bottom, so the middle is at 550.
+    static readonly Box Screen = new(left: 0, top: 1000, right: 1600, bottom: 100);
 
-    static Unit Window(string name, float width = 300, float height = 200, bool running = false, bool focused = false) =>
-        new(name, width, height, running, focused);
+    static Unit Window(string name, float width = 300, float height = 200, bool running = false) =>
+        new(name, width, height, running);
 
-    static Placement Place(string name, params Unit[] units) => Layout.Arrange(Farm, units).Single(p => p.Name == name);
+    static Placement Place(string name, params Unit[] units) => Layout.Arrange(Screen, units).Single(p => p.Name == name);
 
     [Fact]
-    public void A_running_window_goes_to_the_left_column_with_its_right_edge_20_from_the_farm_and_its_top_on_the_farm_top()
+    public void A_running_window_goes_20_from_the_screen_left_and_is_centered_vertically()
     {
-        var placed = Place("main", Window("main", width: 300, running: true));
+        var placed = Place("main", Window("main", height: 200, running: true));
 
-        Assert.Equal(1000 - 20 - 300, placed.Left);
-        Assert.Equal(500, placed.Top);
+        Assert.Equal(20, placed.Left);
+        Assert.Equal(650, placed.Top);
     }
 
     [Fact]
-    public void A_window_that_is_neither_running_nor_focused_goes_to_the_right_column_with_its_left_edge_20_from_the_farm()
+    public void A_window_that_is_not_running_goes_20_from_the_screen_right_and_is_centered_vertically()
     {
-        var placed = Place("idle", Window("idle"));
+        var placed = Place("idle", Window("idle", width: 300, height: 200));
 
-        Assert.Equal(1600 + 20, placed.Left);
-        Assert.Equal(500, placed.Top);
+        Assert.Equal(1600 - 20 - 300, placed.Left);
+        Assert.Equal(650, placed.Top);
     }
 
     [Fact]
-    public void A_focused_window_that_is_not_running_goes_to_the_left_column()
-    {
-        var placed = Place("editing", Window("editing", width: 250, focused: true));
-
-        Assert.Equal(1000 - 20 - 250, placed.Left);
-    }
-
-    [Fact]
-    public void Units_stack_down_each_column_by_name_with_20_between_them_whatever_order_they_come_in()
+    public void Units_stack_down_each_column_by_name_with_5_between_them_and_each_column_is_centered_as_a_whole()
     {
         var units = new[]
         {
@@ -51,13 +43,24 @@ public class LayoutTests
             Window("c", height: 10),
         };
 
-        var placed = Layout.Arrange(Farm, units).ToDictionary(p => p.Name, p => p.Top);
+        var placed = Layout.Arrange(Screen, units).ToDictionary(p => p.Name, p => p.Top);
 
-        Assert.Equal(500, placed["a"]);
-        Assert.Equal(500 - 200 - 20, placed["b"]);
-        Assert.Equal(500 - 200 - 20 - 100 - 20, placed["c"]);
-        Assert.Equal(500, placed["X"]);
-        Assert.Equal(500 - 70 - 20, placed["y"]);
+        // Right column: 200 + 100 + 10 + 2 spaces = 320 high, so its top is 160 above the middle.
+        Assert.Equal(710, placed["a"]);
+        Assert.Equal(710 - 200 - 5, placed["b"]);
+        Assert.Equal(710 - 200 - 5 - 100 - 5, placed["c"]);
+        // Left column: 70 + 50 + 1 space = 125 high.
+        Assert.Equal(612.5f, placed["X"]);
+        Assert.Equal(612.5f - 70 - 5, placed["y"]);
+    }
+
+    [Fact]
+    public void A_column_too_tall_for_the_screen_starts_20_below_the_screen_top()
+    {
+        var placed = Layout.Arrange(Screen, new[] { Window("a", height: 500), Window("b", height: 500) }).ToDictionary(p => p.Name, p => p.Top);
+
+        Assert.Equal(980, placed["a"]);
+        Assert.Equal(980 - 500 - 5, placed["b"]);
     }
 
     static Unit Group(params Unit[] topFirst) => Layout.Group(topFirst);
@@ -71,10 +74,11 @@ public class LayoutTests
             Window("b", height: 50),
         };
 
-        var placed = Layout.Arrange(Farm, units).ToDictionary(p => p.Name, p => p.Top);
+        var placed = Layout.Arrange(Screen, units).ToDictionary(p => p.Name, p => p.Top);
 
-        Assert.Equal(500, placed["a"]);
-        Assert.Equal(500 - 100 - 80 - 20, placed["b"]);
+        // 180 + 50 + 1 space = 235 high.
+        Assert.Equal(667.5f, placed["a"]);
+        Assert.Equal(667.5f - 100 - 80 - 5, placed["b"]);
         Assert.DoesNotContain("zz", placed.Keys);
     }
 
@@ -83,50 +87,40 @@ public class LayoutTests
     {
         var units = new[] { Window("b", height: 50), Group(Window("m", height: 10), Window("a", height: 10)) };
 
-        var placed = Layout.Arrange(Farm, units).ToDictionary(p => p.Name, p => p.Top);
+        var placed = Layout.Arrange(Screen, units).ToDictionary(p => p.Name, p => p.Top);
 
-        Assert.Equal(500, placed["b"]);
-        Assert.Equal(500 - 50 - 20, placed["m"]);
+        Assert.True(placed["b"] > placed["m"]);
     }
 
     [Fact]
-    public void A_dock_group_is_as_wide_as_its_widest_window_and_is_open_when_any_of_its_windows_is()
+    public void A_dock_group_is_as_wide_as_its_widest_window_and_runs_when_any_of_its_windows_does()
     {
-        var group = Group(Window("top", width: 200), Window("under", width: 320, focused: true));
+        var group = Group(Window("top", width: 200), Window("under", width: 320, running: true));
 
-        var placed = Layout.Arrange(Farm, new[] { group }).Single();
-
-        Assert.Equal(1000 - 20 - 320, placed.Left);
+        Assert.Equal(320, group.Width);
+        Assert.Equal(20, Layout.Arrange(Screen, new[] { group }).Single().Left);
     }
 
     [Fact]
-    public void A_dock_group_of_idle_windows_goes_to_the_right_column()
+    public void The_room_between_the_columns_leaves_20_on_each_side_of_the_widest_window_of_each_column()
     {
-        var placed = Layout.Arrange(Farm, new[] { Group(Window("top"), Window("under")) }).Single();
+        var units = new[] { Window("run", width: 250, running: true), Window("a", width: 300), Window("b", width: 180) };
 
-        Assert.Equal(1600 + 20, placed.Left);
+        var room = Layout.Between(Screen, units);
+
+        Assert.Equal(20 + 250 + 20, room.Left);
+        Assert.Equal(1600 - 20 - 300 - 20, room.Right);
+        Assert.Equal(1000, room.Top);
+        Assert.Equal(100, room.Bottom);
     }
 
     [Fact]
-    public void Both_columns_move_outward_when_the_farm_grows()
+    public void Without_a_column_on_one_side_the_room_reaches_that_screen_edge()
     {
-        var bigger = new Box(left: 800, top: 500, right: 1900, bottom: -400);
-        var units = new[] { Window("run", width: 300, running: true), Window("idle") };
+        var room = Layout.Between(Screen, new[] { Window("idle", width: 300) });
 
-        var before = Layout.Arrange(Farm, units).ToDictionary(p => p.Name);
-        var after = Layout.Arrange(bigger, units).ToDictionary(p => p.Name);
-
-        Assert.Equal(before["run"].Left - 200, after["run"].Left);
-        Assert.Equal(before["idle"].Left + 300, after["idle"].Left);
-    }
-
-    [Fact]
-    public void Expanded_follows_running_or_focus()
-    {
-        Assert.False(Window("w").Expanded);
-        Assert.True(Window("w", running: true).Expanded);
-        Assert.True(Window("w", focused: true).Expanded);
-        Assert.True(Layout.IsExpanded(running: true, focused: true));
+        Assert.Equal(0, room.Left);
+        Assert.Equal(1600 - 20 - 300 - 20, room.Right);
     }
 
     [Fact]

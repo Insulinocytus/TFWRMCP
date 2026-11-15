@@ -8,9 +8,10 @@ namespace TFWRMCP.Mod;
 /// <summary>
 /// While the config says so, holds the camera on the farm being shown (see <see cref="CameraTarget"/>): every frame the
 /// farm's rectangle is polled, and when the view that fits it and the code windows changes (the farm grew, shrank or was
-/// swapped for a temporary one, a window moved), the workspace's pan and zoom glide there over a second. The zoom is applied
-/// the way <c>Workspace.Zoom</c> applies it. The player's own camera operations (WASD, scroll zoom off the windows, drag pan,
-/// the game's jump to a window for an error or a search)
+/// swapped for a temporary one, a window moved), the workspace's pan and zoom glide there over a second. The farm is fit
+/// into the screen above the resource bar, or between the columns of <see cref="CodeWindowArranger"/> while it pins the
+/// windows to the screen. The zoom is applied the way <c>Workspace.Zoom</c> applies it. The player's own camera
+/// operations (WASD, scroll zoom off the windows, drag pan, the game's jump to a window for an error or a search)
 /// take the camera from the Mod, see <see cref="CameraTakeover"/>. They are noticed in the game's input code. A game member
 /// that is missing or not what it is assumed to be turns the feature off, or only the noticing of the operations it
 /// belongs to.
@@ -49,7 +50,7 @@ public sealed class CameraAutoCenter : MonoBehaviour
         plugin = owner;
         current = this;
         Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(Workspace), "Zoom"), "Workspace.Zoom", postfix: nameof(Operated));
-        Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(Workspace), nameof(Workspace.MoveCameraTo)), "Workspace.MoveCameraTo", postfix: nameof(Operated));
+        Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(Workspace), nameof(Workspace.MoveCameraTo)), "Workspace.MoveCameraTo", postfix: nameof(Jumped));
         Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(ScaledScrollRect), "OnDrag"), "ScaledScrollRect.OnDrag", prefix: nameof(Dragged));
         Patching.Patch(typeof(CameraAutoCenter), AccessTools.Method(typeof(InputBoss), "Update"), "InputBoss.Update",
             prefix: nameof(InputBegin), postfix: nameof(InputEnd));
@@ -112,12 +113,19 @@ public sealed class CameraAutoCenter : MonoBehaviour
         var pan = content.anchoredPosition + windowRect!(camera).anchoredPosition;
         var unit = content.lossyScale.x / zoom;
         windows.Clear();
-        foreach (var pair in space.codeWindows) windows.Add(BoundsOf(space, pair.Value.GetComponent<Window>()));
-        var view = CameraTarget.Fit(farm, windows, Screen.width / unit, Screen.height / unit, BarHeight(main!) / unit,
-            minZoom!(space), maxZoom!(space));
+        foreach (var pair in space.codeWindows)
+        {
+            var window = pair.Value.GetComponent<Window>();
+            if (!CodeWindowArranger.IsPinned(window)) windows.Add(BoundsOf(space, window));
+        }
 
-        // Panning moves a content point in the zoom container's own coordinates, where the screen center sits 1/zoom as far out.
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, new Vector2(Screen.width / 2f, Screen.height / 2f), space.uiCam, out var screenCenter);
+        // Without pinned windows the farm stays at the screen center, the bar's height taken off the top as well.
+        var bar = ResourceBarPlacement.Height(plugin);
+        var room = CodeWindowArranger.Room ?? new Box(0, Screen.height - bar, Screen.width, bar);
+        var view = CameraTarget.Fit(farm, windows, (room.Right - room.Left) / unit, (room.Top - room.Bottom) / unit, minZoom!(space), maxZoom!(space));
+
+        // Panning moves a content point in the zoom container's own coordinates, where the room's center sits 1/zoom as far out.
+        RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, new Vector2((room.Left + room.Right) / 2, (room.Top + room.Bottom) / 2), space.uiCam, out var screenCenter);
         var farmCenter = (Vector2)parent.InverseTransformPoint(space.container.TransformPoint(new Vector3(view.X, view.Y)));
         var target = pan + screenCenter * zoom / view.Zoom - farmCenter;
 
@@ -160,8 +168,14 @@ public sealed class CameraAutoCenter : MonoBehaviour
         return main == null || main.workspace == null ? null : main.workspace.workspaceContainer;
     }
 
-    // Workspace.Zoom(float) and MoveCameraTo(...), postfix: only the scroll over no window zooms the workspace, and MoveCameraTo is the game's own jump (CodeWindow error, SearchBox), which its LateUpdate would otherwise undo.
+    // Workspace.Zoom(float), postfix: only the scroll over no window zooms the workspace.
     static void Operated() => Patching.Safely(nameof(Operated), () => current?.takeover.PlayerOperated(Time.unscaledTimeAsDouble));
+
+    // Workspace.MoveCameraTo(Window, ...), postfix: the game's own jump (CodeWindow error, SearchBox), which its LateUpdate would otherwise undo; skipped for windows pinned to the screen.
+    static void Jumped(Window __0) => Patching.Safely(nameof(Jumped), () =>
+    {
+        if (!CodeWindowArranger.IsPinned(__0)) current?.takeover.PlayerOperated(Time.unscaledTimeAsDouble);
+    });
 
     // ScaledScrollRect.OnDrag(PointerEventData), prefix: the workspace's drag pan, wherever the drag started.
     static void Dragged(ScaledScrollRect __instance) => Patching.Safely(nameof(Dragged), () =>
@@ -185,14 +199,6 @@ public sealed class CameraAutoCenter : MonoBehaviour
         camera.zoom = zoom;
         zoomContainer.localScale = Vector3.one * zoom;
         content.GetComponent<ContainerScaler>().UpdateMarginSize();
-    }
-
-    // The room the bar takes at the bottom of the screen, in pixels; nothing while it is elsewhere or hidden.
-    float BarHeight(MainSim main)
-    {
-        if (!plugin.ResourceBarAtBottom.Value || main.inv == null || !main.inv.gameObject.activeInHierarchy) return 0;
-        var bar = (RectTransform)main.inv.transform;
-        return bar.rect.height * bar.lossyScale.y;
     }
 
     Box BoundsOf(Workspace space, Window window)
