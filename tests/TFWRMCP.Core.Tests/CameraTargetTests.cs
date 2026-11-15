@@ -29,7 +29,7 @@ public class CameraTargetTests
     }
 
     [Fact]
-    public void The_farm_alone_fills_the_room_left_between_the_window_columns()
+    public void The_farm_alone_fills_the_room_left_by_the_windows()
     {
         // A 600 square farm in a 1000 by 840 room: the height limits.
         Assert.Equal(1.4f, Fit(width: 1000, height: 840).Zoom, 4);

@@ -36,7 +36,7 @@ public readonly struct Unit
     public float Width { get; }
     public float Height { get; }
 
-    /// <summary>The window takes part in a Run; such units go to the left column.</summary>
+    /// <summary>The window takes part in a Run; such units go to the top of the column.</summary>
     public bool Running { get; }
 }
 
@@ -68,38 +68,31 @@ public static class Layout
         topFirst[0].Name, topFirst.Max(u => u.Width), topFirst.Sum(u => u.Height), topFirst.Any(u => u.Running));
 
     /// <summary>
-    /// Running units stack in a column <see cref="Gap"/> from the screen's left edge and the others in one <see cref="Gap"/>
-    /// from its right edge, each sorted by name with no space between units and centered vertically on the
-    /// screen; a column taller than the screen starts <see cref="Gap"/> below its top and runs past its bottom.
+    /// Stacks the units in one column hanging <see cref="Gap"/> left of <paramref name="right"/> and <see cref="Gap"/> below
+    /// <paramref name="top"/>, running ones first, each part sorted by name, with no space between units; the column runs
+    /// past the bottom of the screen when it has to.
     /// </summary>
-    public static List<Placement> Arrange(Box screen, IEnumerable<Unit> units)
+    public static List<Placement> Arrange(float right, float top, IEnumerable<Unit> units)
     {
         var placed = new List<Placement>();
-        foreach (var column in units.GroupBy(u => u.Running))
+        var y = top - Gap;
+        foreach (var unit in units.OrderByDescending(u => u.Running).ThenBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
         {
-            var height = column.Sum(u => u.Height);
-            var top = height > screen.Top - screen.Bottom - 2 * Gap ? screen.Top - Gap : (screen.Top + screen.Bottom + height) / 2;
-            foreach (var unit in column.OrderBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                placed.Add(new Placement(unit.Name, column.Key ? screen.Left + Gap : screen.Right - Gap - unit.Width, top));
-                top -= unit.Height;
-            }
+            placed.Add(new Placement(unit.Name, right - Gap - unit.Width, y));
+            y -= unit.Height;
         }
 
         return placed;
     }
 
-    /// <summary>The part of the screen between the columns <see cref="Arrange"/> makes, a <see cref="Gap"/> clear of each.</summary>
-    public static Box Between(Box screen, IEnumerable<Unit> units)
+    /// <summary>
+    /// The middle of the screen clear of the column <see cref="Arrange"/> makes, with the same width taken off the left so
+    /// that what is centered in it stays at the screen's center.
+    /// </summary>
+    public static Box Room(Box screen, IEnumerable<Unit> units)
     {
-        float left = screen.Left, right = screen.Right;
-        foreach (var unit in units)
-        {
-            if (unit.Running) left = Math.Max(left, screen.Left + unit.Width + 2 * Gap);
-            else right = Math.Min(right, screen.Right - unit.Width - 2 * Gap);
-        }
-
-        return new Box(left, screen.Top, right, screen.Bottom);
+        var margin = units.Select(u => u.Width + 2 * Gap).DefaultIfEmpty(0).Max();
+        return new Box(screen.Left + margin, screen.Top, screen.Right - margin, screen.Bottom);
     }
 }
 

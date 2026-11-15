@@ -19,6 +19,8 @@ public sealed class Plugin : BaseUnityPlugin
 
     public ConfigEntry<bool> AutoArrangeWindows { get; private set; } = null!;
 
+    public ConfigEntry<bool> HideWindows { get; private set; } = null!;
+
     public ConfigEntry<bool> AutoCenterCamera { get; private set; } = null!;
 
     /// <summary>Set when the server is not listening: why.</summary>
@@ -38,9 +40,11 @@ public sealed class Plugin : BaseUnityPlugin
         ResourceBarAtBottom = Config.Bind("Layout", "ResourceBarAtBottom", true,
             "Anchor the resource bar at the bottom center of the screen instead of the game's top left.");
         AutoArrangeWindows = Config.Bind("Layout", "AutoArrangeWindows", true,
-            "Pin the code windows to the screen, folding them all whenever a Run starts or ends or a window joins it, a Script is created, deleted or renamed, or a code window is docked or undocked: windows taking part in a Run go middle left, the rest middle right, following screen size changes.");
+            "Pin the code windows to the screen in one column at the top right, below the game's buttons, folding them all whenever a Run starts or ends or a window joins it, a Script is created, deleted or renamed, or a code window is docked or undocked: windows taking part in a Run first, then the rest, each by name, following screen size changes.");
+        HideWindows = Config.Bind("Layout", "HideWindows", false,
+            "Hide every code and documentation window: they turn invisible and let clicks and scrolls through, while Runs and Tools go on as before.");
         AutoCenterCamera = Config.Bind("Layout", "AutoCenterCamera", true,
-            "Keep the farm centered and zoomed to fit between the pinned code windows above the resource bar, or, without pinned windows, at the screen center together with all code windows, gliding to the new view whenever the farm or the windows change.");
+            "Keep the farm at the center of the screen, zoomed to fit clear of the pinned code windows (the same width kept free on the left) above the resource bar, or, without pinned windows, together with all visible code windows; gliding to the new view whenever the farm or the windows change.");
 
         var game = new GameAdapter(Logger.LogWarning, Logger.LogInfo);
         server = new McpServer(game, Tools.Create(game, Logger.LogError), Port.Value, Logger.LogError);
@@ -51,6 +55,7 @@ public sealed class Plugin : BaseUnityPlugin
         gameObject.AddComponent<ResourceBarPlacement>().Install(this);
         GettingStartedSuppression.Install(this);
         gameObject.AddComponent<CodeWindowArranger>().Install(this);
+        gameObject.AddComponent<WindowHiding>().Install(this);
         gameObject.AddComponent<CameraAutoCenter>().Install(this);
         McpOptions.Install(this);
     }

@@ -3,13 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace TFWRMCP.Mod;
 
 /// <summary>
-/// Pins the code windows to the screen in two columns (see <see cref="Layout"/>): every window is folded, those taking part
-/// in a Run go middle left, the rest middle right, and all glide to their places. Windows docked together are one unit,
-/// moved by their top window; a group holding a documentation window is left alone. The windows stay in the game's
+/// Pins the code windows to the screen in one column (see <see cref="Layout"/>) at the top right, below the game's
+/// add-window, docs and research buttons: every window is folded, and all glide to their places. Windows docked together
+/// are one unit, moved by their top window; a group holding a documentation window is left alone. The windows stay in the game's
 /// zooming workspace container and are scaled against its zoom every frame (docs/adr/0003), so their size on screen is
 /// that at zoom 1 and the game's own window handling and Saves keep working.
 /// </summary>
@@ -19,6 +20,8 @@ public sealed class CodeWindowArranger : MonoBehaviour
     const double Duration = 0.5;
     // CodeWindow recomputes its automatic size two frames after it is folded or unfolded.
     const int SettleFrames = 3;
+    // The handlers of the game's buttons at the top right, which the column stays below.
+    static readonly string[] ButtonHandlers = { "AddNewWindow", "CallAddNewDocsWindow", "OpenCloseMenu" };
 
     // Top-left corners in screen units (pixels over the canvas scale), y up.
     sealed class Pin
@@ -36,19 +39,24 @@ public sealed class CodeWindowArranger : MonoBehaviour
     readonly List<Unit> units = new();
     readonly List<Unit> members = new();
     readonly Dictionary<string, Window> byName = new();
+    readonly List<RectTransform> buttons = new();
+    readonly Vector3[] corners = new Vector3[4];
     static CodeWindowArranger? instance;
     Plugin plugin = null!;
     Workspace? workspace;
     bool wasOn, pending, broken, rearrange, docksChanged;
     int settle;
-    (int Width, int Height, float Scale, float Bar) view;
+    (int Width, int Height, float Scale, float Bar, float ButtonsBottom) view;
     Box? room;
 
-    /// <summary>The screen between the two columns in pixels, y up, while windows are arranged.</summary>
-    public static Box? Room => instance == null ? null : instance.room;
+    /// <summary>The middle of the screen clear of the column in pixels, y up, while windows are arranged and shown.</summary>
+    public static Box? Room => instance == null || WindowHiding.Active ? null : instance.room;
 
     /// <summary>Whether the window is pinned to the screen, alone or docked under a pinned window.</summary>
     public static bool IsPinned(Window window) => instance != null && window != null && instance.pins.ContainsKey(window.HighestDockedParent);
+
+    /// <summary>Whether the game's jump of the camera to the window is wanted: not while it is pinned on screen or hidden.</summary>
+    public static bool CameraMayJumpTo(Window window) => !WindowHiding.Active && !IsPinned(window);
 
     public void Install(Plugin owner)
     {
@@ -103,11 +111,11 @@ public sealed class CodeWindowArranger : MonoBehaviour
         if (instance != null && instance.docksChanged) instance.rearrange = true;
     });
 
-    // Workspace.MoveCameraTo, prefix: the jump to a window for an error or a search makes no sense for a window pinned on screen.
+    // Workspace.MoveCameraTo, prefix: the jump to a window for an error or a search, see CameraMayJumpTo.
     static bool CameraJump(Window target)
     {
         var jump = true;
-        Patching.Safely(nameof(CameraJump), () => jump = !IsPinned(target));
+        Patching.Safely(nameof(CameraJump), () => jump = CameraMayJumpTo(target));
         return jump;
     }
 
@@ -146,6 +154,7 @@ public sealed class CodeWindowArranger : MonoBehaviour
             var canvas = space.container.GetComponentInParent<Canvas>();
             if (canvas == null || canvas.rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
                 throw new InvalidOperationException("the workspace is not on a screen space overlay canvas");
+            FindButtons();
         }
 
         if (!space.gameObject.activeInHierarchy) return;
@@ -156,7 +165,7 @@ public sealed class CodeWindowArranger : MonoBehaviour
         }
 
         var scale = Scale(space);
-        var now = (Screen.width, Screen.height, scale, ResourceBarPlacement.Height(plugin));
+        var now = (Screen.width, Screen.height, scale, ResourceBarPlacement.Height(plugin), ButtonsBottom());
         var resized = now != view;
         view = now;
 
@@ -248,14 +257,14 @@ public sealed class CodeWindowArranger : MonoBehaviour
             byName[unit.Name] = group[0].GetComponent<Window>();
         }
 
-        var bounds = new Box(0, view.Height / scale, view.Width / scale, view.Bar / scale);
+        var bounds = new Box(0, (view.Height - view.Bar) / scale, view.Width / scale, view.Bar / scale);
         var now = Time.unscaledTimeAsDouble;
         foreach (var pair in pins)
             if (pair.Key == null || !byName.ContainsValue(pair.Key)) gone.Add(pair.Key!);
         foreach (var window in gone) Unpin(window);
         gone.Clear();
 
-        foreach (var place in Layout.Arrange(bounds, units))
+        foreach (var place in Layout.Arrange(view.Width / scale, view.ButtonsBottom / scale, units))
         {
             var window = byName[place.Name];
             if (!pins.TryGetValue(window, out var pin)) pins[window] = pin = new Pin { To = TopLeft(window) };
@@ -264,8 +273,34 @@ public sealed class CodeWindowArranger : MonoBehaviour
             pin.Start = now;
         }
 
-        var between = Layout.Between(bounds, units);
+        var between = Layout.Room(bounds, units);
         room = new Box(between.Left * scale, between.Top * scale, between.Right * scale, between.Bottom * scale);
+    }
+
+    void FindButtons()
+    {
+        buttons.Clear();
+        foreach (var button in FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            for (var i = 0; i < button.onClick.GetPersistentEventCount(); i++)
+                if (ButtonHandlers.Contains(button.onClick.GetPersistentMethodName(i)))
+                    buttons.Add((RectTransform)button.transform);
+        if (buttons.Count == 0) Patching.Warn("The game's buttons at the top right were not found; the code window column starts at the top of the screen.");
+    }
+
+    // The lowest bottom edge of the buttons that are shown, in pixels, y up; the screen's top when none is.
+    float ButtonsBottom()
+    {
+        float bottom = Screen.height;
+        foreach (var button in buttons)
+        {
+            if (button == null || !button.gameObject.activeInHierarchy) continue;
+            var canvas = button.GetComponentInParent<Canvas>().rootCanvas;
+            var camera = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+            button.GetWorldCorners(corners);
+            foreach (var corner in corners) bottom = Mathf.Min(bottom, RectTransformUtility.WorldToScreenPoint(camera, corner).y);
+        }
+
+        return bottom;
     }
 
     // A group is gone from the plan when one of its windows was closed since it was decided.

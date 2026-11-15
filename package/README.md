@@ -31,15 +31,19 @@ The server only listens on localhost. Its settings are in the game's options men
 - **Auto-arrange code windows**: pins the code windows to the screen, so they no longer pan and zoom with the farm and
   keep the size they have at zoom 1 (following the game's UI size option). Whenever a Run starts or ends, a Script joins
   the Run for the first time, a Script is created, deleted or renamed (by you or an agent), or a code window is docked
-  or undocked, every code window is folded and they glide into two columns: those taking part in a Run at the
-  middle left of the screen, the rest at the middle right, each sorted by name and centered above the resource bar.
+  or undocked, every code window is folded and they glide into one column at the top right of the screen, 20 below the
+  game's add-window, docs and research buttons: those taking part in a Run first, then the rest, each part sorted by
+  name, the column running down past the resource bar when it has to.
   Windows docked together move as one unit sorted by their top window (a group holding a documentation window is left
   alone in the workspace). A window you unfold or drag stays so until the next trigger. The game's jump to a window for
   an error or a search is skipped for pinned windows. Switching it off leaves the windows where they are on screen, back
   in the workspace. On by default.
-- **Auto-center camera on farm**: keeps the farm centered and zooms it to fit within the game's own zoom limits: between
-  the two columns of pinned code windows and above the resource bar while auto-arrange is on, otherwise at the center of
-  the screen together with every code window (the resource bar's height is left out). When the farm changes size (an expand, `set_world_size()`, a Run ending) or a
+- **Hide all windows**: makes every code and documentation window invisible and lets clicks and scrolls pass through
+  them; Runs and tools carry on, and the game's jump to a window is skipped. Off by default.
+- **Auto-center camera on farm**: keeps the farm at the center of the screen and zooms it to fit within the game's own
+  zoom limits: clear of the column of pinned code windows, with the same width kept free on the left, and above the
+  resource bar while auto-arrange is on; with all windows hidden, the whole screen above the bar; otherwise together with
+  every code window (the resource bar's height is left out). When the farm changes size (an expand, `set_world_size()`, a Run ending) or a
   `simulate()` / Leaderboard Run farm comes or goes, or the windows move, the camera glides to the new view over a
   second. While it is on it holds the camera; switching it off leaves the camera where it is. On by default.
 

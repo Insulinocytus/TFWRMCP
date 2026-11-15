@@ -9,7 +9,7 @@ namespace TFWRMCP.Mod;
 /// While the config says so, holds the camera on the farm being shown (see <see cref="CameraTarget"/>): every frame the
 /// farm's rectangle is polled, and when the view that fits it and the code windows changes (the farm grew, shrank or was
 /// swapped for a temporary one, a window moved), the workspace's pan and zoom glide there over a second. The farm is fit
-/// into the screen above the resource bar, or between the columns of <see cref="CodeWindowArranger"/> while it pins the
+/// into the screen above the resource bar, or clear of the column of <see cref="CodeWindowArranger"/> while it pins the
 /// windows to the screen. The zoom is applied the way <c>Workspace.Zoom</c> applies it. The player's own camera
 /// operations (WASD, scroll zoom off the windows, drag pan, the game's jump to a window for an error or a search)
 /// take the camera from the Mod, see <see cref="CameraTakeover"/>. They are noticed in the game's input code. A game member
@@ -113,10 +113,14 @@ public sealed class CameraAutoCenter : MonoBehaviour
         var pan = content.anchoredPosition + windowRect!(camera).anchoredPosition;
         var unit = content.lossyScale.x / zoom;
         windows.Clear();
-        foreach (var pair in space.codeWindows)
+        var hidden = WindowHiding.Active;
+        if (!hidden)
         {
-            var window = pair.Value.GetComponent<Window>();
-            if (!CodeWindowArranger.IsPinned(window)) windows.Add(BoundsOf(space, window));
+            foreach (var pair in space.codeWindows)
+            {
+                var window = pair.Value.GetComponent<Window>();
+                if (!CodeWindowArranger.IsPinned(window)) windows.Add(BoundsOf(space, window));
+            }
         }
 
         // Without pinned windows the farm stays at the screen center, the bar's height taken off the top as well.
@@ -171,10 +175,10 @@ public sealed class CameraAutoCenter : MonoBehaviour
     // Workspace.Zoom(float), postfix: only the scroll over no window zooms the workspace.
     static void Operated() => Patching.Safely(nameof(Operated), () => current?.takeover.PlayerOperated(Time.unscaledTimeAsDouble));
 
-    // Workspace.MoveCameraTo(Window, ...), postfix: the game's own jump (CodeWindow error, SearchBox), which its LateUpdate would otherwise undo; skipped for windows pinned to the screen.
+    // Workspace.MoveCameraTo(Window, ...), postfix: the game's own jump (CodeWindow error, SearchBox), which its LateUpdate would otherwise undo; skipped for windows pinned to the screen or hidden.
     static void Jumped(Window __0) => Patching.Safely(nameof(Jumped), () =>
     {
-        if (!CodeWindowArranger.IsPinned(__0)) current?.takeover.PlayerOperated(Time.unscaledTimeAsDouble);
+        if (CodeWindowArranger.CameraMayJumpTo(__0)) current?.takeover.PlayerOperated(Time.unscaledTimeAsDouble);
     });
 
     // ScaledScrollRect.OnDrag(PointerEventData), prefix: the workspace's drag pan, wherever the drag started.
