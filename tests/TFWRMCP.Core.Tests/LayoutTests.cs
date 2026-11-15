@@ -32,7 +32,7 @@ public class LayoutTests
     }
 
     [Fact]
-    public void Units_stack_down_each_column_by_name_with_5_between_them_and_each_column_is_centered_as_a_whole()
+    public void Units_stack_down_each_column_by_name_touching_and_each_column_is_centered_as_a_whole()
     {
         var units = new[]
         {
@@ -45,13 +45,13 @@ public class LayoutTests
 
         var placed = Layout.Arrange(Screen, units).ToDictionary(p => p.Name, p => p.Top);
 
-        // Right column: 200 + 100 + 10 + 2 spaces = 320 high, so its top is 160 above the middle.
-        Assert.Equal(710, placed["a"]);
-        Assert.Equal(710 - 200 - 5, placed["b"]);
-        Assert.Equal(710 - 200 - 5 - 100 - 5, placed["c"]);
-        // Left column: 70 + 50 + 1 space = 125 high.
-        Assert.Equal(612.5f, placed["X"]);
-        Assert.Equal(612.5f - 70 - 5, placed["y"]);
+        // Right column: 200 + 100 + 10 = 310 high, so its top is 155 above the middle.
+        Assert.Equal(705, placed["a"]);
+        Assert.Equal(705 - 200, placed["b"]);
+        Assert.Equal(705 - 200 - 100, placed["c"]);
+        // Left column: 70 + 50 = 120 high.
+        Assert.Equal(610, placed["X"]);
+        Assert.Equal(610 - 70, placed["y"]);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public class LayoutTests
         var placed = Layout.Arrange(Screen, new[] { Window("a", height: 500), Window("b", height: 500) }).ToDictionary(p => p.Name, p => p.Top);
 
         Assert.Equal(980, placed["a"]);
-        Assert.Equal(980 - 500 - 5, placed["b"]);
+        Assert.Equal(980 - 500, placed["b"]);
     }
 
     static Unit Group(params Unit[] topFirst) => Layout.Group(topFirst);
@@ -76,9 +76,9 @@ public class LayoutTests
 
         var placed = Layout.Arrange(Screen, units).ToDictionary(p => p.Name, p => p.Top);
 
-        // 180 + 50 + 1 space = 235 high.
-        Assert.Equal(667.5f, placed["a"]);
-        Assert.Equal(667.5f - 100 - 80 - 5, placed["b"]);
+        // 180 + 50 = 230 high.
+        Assert.Equal(665, placed["a"]);
+        Assert.Equal(665 - 100 - 80, placed["b"]);
         Assert.DoesNotContain("zz", placed.Keys);
     }
 

@@ -59,7 +59,6 @@ public readonly struct Placement
 public static class Layout
 {
     public const float Gap = 20;
-    public const float Spacing = 5;
 
     /// <summary>
     /// Docked windows, top one first, as one unit: named by the top window (which is what it sorts by and what moves), as wide
@@ -70,7 +69,7 @@ public static class Layout
 
     /// <summary>
     /// Running units stack in a column <see cref="Gap"/> from the screen's left edge and the others in one <see cref="Gap"/>
-    /// from its right edge, each sorted by name with <see cref="Spacing"/> between units and centered vertically on the
+    /// from its right edge, each sorted by name with no space between units and centered vertically on the
     /// screen; a column taller than the screen starts <see cref="Gap"/> below its top and runs past its bottom.
     /// </summary>
     public static List<Placement> Arrange(Box screen, IEnumerable<Unit> units)
@@ -78,12 +77,12 @@ public static class Layout
         var placed = new List<Placement>();
         foreach (var column in units.GroupBy(u => u.Running))
         {
-            var height = column.Sum(u => u.Height) + Spacing * (column.Count() - 1);
+            var height = column.Sum(u => u.Height);
             var top = height > screen.Top - screen.Bottom - 2 * Gap ? screen.Top - Gap : (screen.Top + screen.Bottom + height) / 2;
             foreach (var unit in column.OrderBy(u => u.Name, StringComparer.OrdinalIgnoreCase))
             {
                 placed.Add(new Placement(unit.Name, column.Key ? screen.Left + Gap : screen.Right - Gap - unit.Width, top));
-                top -= unit.Height + Spacing;
+                top -= unit.Height;
             }
         }
 
